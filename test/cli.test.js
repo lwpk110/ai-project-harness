@@ -33,3 +33,17 @@ test('verify executes npm commands on Windows', () => {
   fs.writeFileSync(path.join(cwd, 'harness.yaml'), 'schema: 1\ncommands:\n  verify: "npm --version"\n');
   assert.match(run(cwd, 'verify'), /Harness verify: OK/);
 });
+
+test('plugin management validates and toggles built-in plugins', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-'));
+  run(cwd, 'init');
+  fs.mkdirSync(path.join(cwd, 'plugins', 'spec-driven'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, 'plugins', 'spec-driven', 'harness-plugin.yaml'), 'apiVersion: harness.dev/v1\nkind: Plugin\nmetadata:\n  name: spec-driven\n  version: 0.1.0\n');
+  assert.match(run(cwd, 'plugin', 'validate', 'spec-driven'), /Valid plugin spec-driven/);
+  run(cwd, 'enable', 'spec-driven');
+  assert.match(run(cwd, 'plugin', 'list'), /spec-driven\tenabled\t0.1.0/);
+  run(cwd, 'disable', 'spec-driven');
+  assert.match(run(cwd, 'plugin', 'list'), /spec-driven\tdisabled\t0.1.0/);
+  run(cwd, 'remove', 'spec-driven');
+  assert.doesNotMatch(fs.readFileSync(path.join(cwd, 'harness.yaml'), 'utf8'), /spec-driven/);
+});
