@@ -33,3 +33,10 @@ test('verify executes npm commands on Windows', () => {
   fs.writeFileSync(path.join(cwd, 'harness.yaml'), 'schema: 1\ncommands:\n  verify: "npm --version"\n');
   assert.match(run(cwd, 'verify'), /Harness verify: OK/);
 });
+
+test('verify preserves quoted command arguments', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-'));
+  run(cwd, 'init');
+  fs.writeFileSync(path.join(cwd, 'harness.yaml'), "schema: 1\ncommands:\n  verify: 'node -e \"console.log(123)\"'\n");
+  assert.match(run(cwd, 'verify'), /Harness verify: OK/);
+});
