@@ -125,7 +125,7 @@ function apply() {
 }
 function addPlugin(name) { if (!builtins.includes(name)) throw new Error(`Unknown built-in plugin: ${name}`); const config = parseConfig(); config.plugins[name] = { enabled: true }; saveConfig(config); console.log(`Enabled plugin ${name}`); }
 function doctor() { const config = parseConfig(); const errors = []; for (const name of Object.keys(config.plugins ?? {})) if (!builtins.includes(name)) errors.push(`Unknown plugin: ${name}`); if (!config.commands?.verify) errors.push('commands.verify is required'); if (errors.length) { console.error(errors.join('\n')); process.exitCode = 1; } else console.log('Harness doctor: OK'); }
-function verify() { const config = parseConfig(); const command = config.commands?.verify; if (!command) throw new Error('commands.verify is required'); const [bin, ...args] = command.split(/\s+/); execFileSync(bin, args, { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' }); console.log('Harness verify: OK'); }
+function verify() { const config = parseConfig(); const command = config.commands?.verify; if (!command) throw new Error('commands.verify is required'); const [bin, ...args] = command.split(/\s+/); if (process.platform === 'win32') execFileSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', command], { cwd: root, stdio: 'inherit' }); else execFileSync(bin, args, { cwd: root, stdio: 'inherit' }); console.log('Harness verify: OK'); }
 function help() { console.log('harness init | adopt | audit | plan | apply | add <plugin> | doctor | verify'); }
 
 const { command, options, positional } = parseArgs(process.argv.slice(2));
