@@ -1,0 +1,16 @@
+{
+  "name": "ai-project-harness",
+  "version": "0.1.0",
+  "description": "Composable harness for AI-agent-driven software projects",
+  "type": "module",
+  "bin": {
+    "harness": "src/cli.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "verify": "node src/cli.js doctor && node src/cli.js verify"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

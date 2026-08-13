@@ -1,0 +1,11 @@
+apiVersion: harness.dev/v1
+kind: Plugin
+metadata:
+  name: spec-driven
+  version: 0.1.0
+contributes:
+  workflows:
+    - spec-driven-development
+  skills:
+    - spec-authoring
+permissions: {}

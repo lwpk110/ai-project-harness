@@ -1,0 +1,18 @@
+apiVersion: harness.dev/v1
+kind: Plugin
+metadata:
+  name: github-development
+  version: 0.1.0
+contributes:
+  workflows:
+    - issue-to-pr
+  skills:
+    - github-operations
+  connectors:
+    - github-mcp
+permissions:
+  network:
+    hosts:
+      - api.github.com
+  secrets:
+    - GITHUB_TOKEN

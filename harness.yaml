@@ -1,0 +1,14 @@
+schema: 1
+project:
+  mode: new
+  detected: [object Object]
+integration:
+  policy: preserve-existing
+  auto_fix_max_priority: P2
+plugins:
+  spec-driven: true
+commands:
+  verify: "npm test"
+policies:
+  require_tests: true
+  production_access: approval

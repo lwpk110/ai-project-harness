@@ -1,0 +1,5 @@
+node_modules/
+.harness/state.json
+.harness/cache/
+.harness/recovery/
+*.log

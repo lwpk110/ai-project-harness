@@ -1,0 +1,11 @@
+apiVersion: harness.dev/v1
+kind: Plugin
+metadata:
+  name: prototype-replication
+  version: 0.1.0
+contributes:
+  skills:
+    - prototype-replication
+permissions:
+  network:
+    hosts: []

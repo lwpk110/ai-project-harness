@@ -1,0 +1,11 @@
+apiVersion: harness.dev/v1
+kind: Plugin
+metadata:
+  name: documentation
+  version: 0.1.0
+contributes:
+  standards:
+    - docs-as-code
+  workflows:
+    - documentation-sync
+permissions: {}
