@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 
 const root = process.cwd();
 const harnessDir = path.join(root, '.harness');
@@ -69,7 +69,7 @@ function saveConfig(config) {
   write(configPath, `${lines.join('\n')}\n`);
 }
 function format(v) { return typeof v === 'string' && /\s/.test(v) ? JSON.stringify(v) : String(v); }
-function splitCommand(command) { const parts = []; let current = ''; let quote = ''; for (const char of command.trim()) { if (quote) { if (char === quote) quote = ''; else current += char; } else if (char === '"' || char === "'") quote = char; else if (/\s/.test(char)) { if (current) { parts.push(current); current = ''; } } else current += char; } if (quote) throw new Error('Unterminated quote in verification command'); if (current) parts.push(current); return parts; }
+function splitCommand(command) { const parts = []; let current = ''; let quote = ''; let escaped = false; for (const char of command.trim()) { if (escaped) { current += char; escaped = false; } else if (char === '\\' && quote === '"') escaped = true; else if (quote) { if (char === quote) quote = ''; else current += char; } else if (char === '"' || char === "'") quote = char; else if (/\s/.test(char)) { if (current) { parts.push(current); current = ''; } } else current += char; } if (escaped) current += '\\'; if (quote) throw new Error('Unterminated quote in verification command'); if (current) parts.push(current); return parts; }
 function loadState() { return exists(statePath) ? JSON.parse(readText(statePath)) : { files: {}, audit: null, plan: null }; }
 function saveState(state) { ensureDir(harnessDir); write(statePath, `${JSON.stringify(state, null, 2)}\n`); }
 function projectFiles() { return fs.readdirSync(root, { withFileTypes: true }).filter(e => !['.git', '.harness', 'node_modules'].includes(e.name)).map(e => e.name); }
@@ -126,7 +126,7 @@ function apply() {
 }
 function addPlugin(name) { if (!builtins.includes(name)) throw new Error(`Unknown built-in plugin: ${name}`); const config = parseConfig(); config.plugins[name] = { enabled: true }; saveConfig(config); console.log(`Enabled plugin ${name}`); }
 function doctor() { const config = parseConfig(); const errors = []; for (const name of Object.keys(config.plugins ?? {})) if (!builtins.includes(name)) errors.push(`Unknown plugin: ${name}`); if (!config.commands?.verify) errors.push('commands.verify is required'); if (errors.length) { console.error(errors.join('\n')); process.exitCode = 1; } else console.log('Harness doctor: OK'); }
-function verify() { const config = parseConfig(); const command = config.commands?.verify; if (!command) throw new Error('commands.verify is required'); const [bin, ...args] = splitCommand(command); if (process.platform === 'win32') execFileSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', command], { cwd: root, stdio: 'inherit' }); else execFileSync(bin, args, { cwd: root, stdio: 'inherit' }); console.log('Harness verify: OK'); }
+function verify() { const config = parseConfig(); const command = config.commands?.verify; if (!command) throw new Error('commands.verify is required'); if (process.platform === 'win32') execSync(command, { cwd: root, stdio: 'inherit' }); else { const [bin, ...args] = splitCommand(command); execFileSync(bin, args, { cwd: root, stdio: 'inherit' }); } console.log('Harness verify: OK'); }
 function help() { console.log('harness init | adopt | audit | plan | apply | add <plugin> | doctor | verify'); }
 
 const { command, options, positional } = parseArgs(process.argv.slice(2));
