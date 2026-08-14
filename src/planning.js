@@ -200,7 +200,7 @@ function materializeOperation(declaration, recipe, index, view) {
     if (entry?.type !== 'file') throw new Error(`Recipe ${recipe.plugin}/${recipe.id} requires existing file ${operation.path}`);
     operation.precondition = { state: 'file', hash: entry.hash };
   } else if (operation.type === 'directory.ensure') {
-    if (entry?.type === 'file') throw new Error(`Recipe ${recipe.plugin}/${recipe.id} cannot create directory over file ${operation.path}`);
+    if (entry && entry.type !== 'directory') throw new Error(`Recipe ${recipe.plugin}/${recipe.id} cannot create directory over ${entry.type} ${operation.path}`);
     operation.precondition = { state: entry ? 'directory' : 'absent' };
   }
   return operation;

@@ -466,3 +466,16 @@ test('planning permission boundaries do not treat sibling prefixes as descendant
   assert.throws(() => buildPlan({ root: cwd, config, resolved, report }), /may not write undeclared path generated2\/out.txt/);
   assert.throws(() => validatePlanningContributions(resolved), /may not write undeclared path generated2\/out.txt/);
 });
+
+test('planning rejects directory.ensure over symlinks', { skip: process.platform === 'win32' }, () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-symlink-'));
+  fs.symlinkSync('target', path.join(cwd, 'generated'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-plugin-'));
+  fs.mkdirSync(path.join(directory, 'contributions', 'recipes'), { recursive: true });
+  fs.writeFileSync(path.join(directory, 'contributions', 'recipes', 'ensure.yaml'), 'apiVersion: harness.dev/v1\nkind: Recipe\nmetadata:\n  id: ensure\n  module: test\nwhen:\n  finding: example.trigger\noperations:\n  - { type: directory.ensure, path: generated }\n');
+  const config = { integration: { auto_fix_max_priority: 'P2' } };
+  const report = { findings: [{ id: 'example.trigger', priority: 'P2' }] };
+  const loaded = { directory, manifest: { metadata: { version: '0.1.0' }, contributes: { recipes: ['ensure'] }, permissions: { filesystem: { write: ['generated'] } } } };
+  const resolved = { ordered: ['example'], active: new Map([['example', loaded]]) };
+  assert.throws(() => buildPlan({ root: cwd, config, resolved, report }), /cannot create directory over symlink generated/);
+});
