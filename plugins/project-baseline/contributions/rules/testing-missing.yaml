@@ -1,0 +1,12 @@
+apiVersion: harness.dev/v1
+kind: Rule
+metadata:
+  id: testing-missing
+when:
+  fact: project.has-tests
+  equals: false
+finding:
+  id: testing.missing
+  priority: P1
+  title: 没有明显的测试目录或文件
+  action: 配置可重复的测试命令并补充关键路径测试

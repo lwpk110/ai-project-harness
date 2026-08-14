@@ -4,7 +4,7 @@
 
 - 产品名称：AI Project Harness
 - 文档版本：v0.1
-- 文档状态：M1 协议基础已实现，待 M2/M3 迁移和试点验证
+- 文档状态：M1/M2 已实现，待 M3 受治理变更迁移和试点验证
 - 目标读者：产品负责人、平台工程师、AI Agent 开发者、研发团队负责人
 
 ## 2. 背景与问题
@@ -541,7 +541,7 @@ v0.1 只交付声明式 manifest、启用/禁用、校验和权限展示所需�
 9. 保留现有文件的 `audit → plan → apply`，包含输入哈希、recovery snapshot 和文件归属；
 10. Verifier contract、`doctor` 和统一 `verify`；
 11. 权限元数据校验和 Plan 级权限审查，不执行未批准命令、网络或 Secret 操作；
-12. Git、Spec、Docs、GitHub、Prototype、DeepSeek Harness 六个官方声明式插件及其契约测试。
+12. Project Baseline、Git、Spec、Docs、GitHub、Prototype、DeepSeek Harness 七个官方声明式插件及其契约测试。
 
 ### 暂不包含
 
@@ -570,14 +570,14 @@ v0.1 满足以下条件时可交付：
 8. 未声明或未批准的 filesystem、command、network 和 secret 能力被拒绝；
 9. `harness verify` 与 CI 使用同一验证入口，Verifier 结果包含 Provider；
 10. DeepSeek Harness 插件可被发现、校验、启用和禁用，但不会安装外部包、读取凭据或执行 runtime；
-11. 核心 capability contract、六个官方插件和 adopt 流程均有自动化测试；
+11. 核心 capability contract、七个官方插件和 adopt 流程均有自动化测试；
 12. 架构、协议、配置 Schema、CLI 帮助和当前实现差距可独立阅读。
 
 ## 14. 版本路线
 
 ### v0.1：插件内核与安全接入闭环
 
-完成 M0-M3：统一术语和 ADR、Manifest/catalog、Detector/Rule 只读组合、Recipe/Operation 受治理变更，以及六个官方声明式插件。M1 已完成：结构化 YAML、Manifest/catalog、兼容性、依赖拓扑和贡献 ID 唯一性；v0.1 不执行第三方插件代码。
+规划完成 M0-M3：统一术语和 ADR、Manifest/catalog、Detector/Rule 只读组合、Recipe/Operation 受治理变更，以及七个官方声明式插件。当前已完成 M1：结构化 YAML、Manifest/catalog、兼容性、依赖拓扑和贡献 ID 唯一性；已完成 M2：不可变 ProjectView、声明式 Detector/Rule 组合和带 Provider 溯源的审计结果。v0.1 不执行第三方插件代码。
 
 ### v0.2：生命周期、升级与 Hosted Plugin
 

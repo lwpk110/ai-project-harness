@@ -287,7 +287,7 @@ Exit criterion: new design work uses the common kernel, plugin, contribution, fa
 
 Exit criterion: adding a declarative built-in plugin requires no `src/cli.js` edit.
 
-### M2: Read-only composition
+### M2: Read-only composition (implemented)
 
 - Introduce read-only ProjectView, FactStore, Detector, and Rule contracts.
 - Move stack, package-manager, CI, documentation, testing, and agent-instruction detection into official plugins.
@@ -325,7 +325,7 @@ Exit criterion: the same project plan and verification policy can be executed by
 The current v0.1 slice intentionally falls short of this target:
 
 - catalog discovery and validation are local-only; registry resolution, signatures, and broad SemVer support are deferred;
-- detector and audit logic live in the CLI;
+- ProjectView, detector selection, fact records, and rule evaluation are kernel protocols; only the generic protocol executor lives in `src/audit.js`;
 - plan recipes and apply behavior are hard-coded;
 - permission declarations are not yet enforced;
 - plugins cannot yet register providers or lifecycle effects;

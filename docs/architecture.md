@@ -85,9 +85,9 @@ The project borrows plugin composition, Definition/Provider/Consumer capability 
 
 ## Current Implementation
 
-The runnable v0.1 slice proves the CLI and safe adoption flow. M1 has also replaced Manifest field matching with structural YAML parsing, discovers bundled plugins from their manifests, and validates compatibility, enabled dependency order, and duplicate contribution ids. It is not yet the target microkernel:
+The runnable v0.1 slice proves the CLI and safe adoption flow. M1 replaced Manifest field matching with structural YAML parsing, discovers bundled plugins from their manifests, and validates compatibility, enabled dependency order, and duplicate contribution ids. M2 provides an immutable ProjectView and composes declarative Detector and Rule contributions into provenance-backed audit reports. It is not yet the target microkernel:
 
-- detection, audit, planning, and application rules live in `src/cli.js`;
+- planning and application rules live in `src/cli.js`; detection and audit rules are now contributed by the `project-baseline` official plugin;
 - permissions are declared but not enforced;
 - plugins cannot register providers or lifecycle effects;
 - the lockfile records manifest integrity but does not yet resolve remote sources or migrations;

@@ -1,0 +1,12 @@
+apiVersion: harness.dev/v1
+kind: Rule
+metadata:
+  id: docs-missing
+when:
+  fact: project.has-docs
+  equals: false
+finding:
+  id: docs.missing
+  priority: P2
+  title: 缺少项目文档入口
+  action: 初始化 README.md 和 docs/architecture.md

@@ -1,0 +1,59 @@
+apiVersion: harness.dev/v1
+kind: Detector
+metadata:
+  id: project-baseline
+facts:
+  - id: project.stack
+    select:
+      type: first-existing
+      candidates:
+        - path: package.json
+          value: node
+        - path: pyproject.toml
+          value: python
+      default: unknown
+  - id: project.package-manager
+    select:
+      type: first-existing
+      candidates:
+        - path: pnpm-lock.yaml
+          value: pnpm
+        - path: yarn.lock
+          value: yarn
+        - path: package-lock.json
+          value: npm
+      default: unknown
+  - id: project.ci
+    select:
+      type: first-existing
+      candidates:
+        - path: .github/workflows
+          value: github-actions
+      default: unknown
+  - id: project.agent-instructions
+    select:
+      type: all-existing
+      paths:
+        - AGENTS.md
+        - CLAUDE.md
+        - .cursor
+  - id: project.has-tests
+    select:
+      type: path-contains
+      terms:
+        - test
+        - spec
+      types:
+        - file
+        - directory
+  - id: project.has-docs
+    select:
+      type: any-path
+      paths:
+        - README.md
+        - docs
+  - id: project.has-gitignore
+    select:
+      type: any-path
+      paths:
+        - .gitignore
