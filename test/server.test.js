@@ -43,7 +43,9 @@ test('HTTP backend serves health, frontend assets, and safe 404 responses', asyn
   assert.match(await page.text(), /Governed workspace/);
   const script = await fetch(`${base}/app.js`);
   assert.equal(script.headers.get('content-type'), 'text/javascript; charset=utf-8');
-  assert.match(await script.text(), /\/api\/dashboard/);
+  const scriptText = await script.text();
+  assert.match(scriptText, /\/api\/dashboard/);
+  assert.match(scriptText, /accept: 'application\/json'/);
   const styles = await fetch(`${base}/styles.css`);
   assert.equal(styles.headers.get('content-type'), 'text/css; charset=utf-8');
   assert.match(await styles.text(), /\.panel-heading > \.mono/);
@@ -94,7 +96,18 @@ test('HTTP backend validates apply input and exposes governed apply errors', asy
 
   const invalid = await fetch(`${base}/api/apply`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' });
   assert.equal(invalid.status, 400);
-  assert.match((await invalid.json()).error.message, /valid JSON/);
+  const invalidBody = await invalid.json();
+  assert.equal(invalidBody.error.code, 'invalid_json');
+
+  const unsupportedMediaType = await fetch(`${base}/api/apply`, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: '{}' });
+  assert.equal(unsupportedMediaType.status, 415);
+  assert.equal((await unsupportedMediaType.json()).error.code, 'unsupported_media_type');
+
+  const unknownField = await fetch(`${base}/api/apply`, { method: 'POST', headers: { 'content-type': 'application/json; charset=utf-8' }, body: JSON.stringify({ modules: ['docs'], dryRun: true }) });
+  assert.equal(unknownField.status, 400);
+  assert.equal((await unknownField.json()).error.code, 'unknown_request_field');
+
+  assert.match(invalidBody.error.message, /valid JSON/);
 
   const tooLarge = await fetch(`${base}/api/apply`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ modules: ['x'.repeat(20 * 1024)] }) });
   assert.equal(tooLarge.status, 413);

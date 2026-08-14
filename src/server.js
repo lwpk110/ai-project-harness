@@ -192,12 +192,27 @@ function readBody(request) {
   });
 }
 
-function parseApplyBody(raw) {
-  if (!raw.trim()) return {};
+function requestError(message, statusCode, code) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
+}
+
+function isJsonContentType(contentType) {
+  return typeof contentType === 'string'
+    && /^application\/json(?:\s*;\s*charset\s*=\s*(?:"[^"]*"|[^;\s]+))?$/i.test(contentType.trim());
+}
+
+function parseApplyBody(raw, contentType) {
+  if (raw.length === 0) return {};
+  if (!isJsonContentType(contentType)) throw requestError('Content-Type must be application/json for a non-empty request body', 415, 'unsupported_media_type');
   let value;
-  try { value = JSON.parse(raw); } catch { const error = new Error('Request body must be valid JSON'); error.statusCode = 400; throw error; }
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) { const error = new Error('Request body must be a JSON object'); error.statusCode = 400; throw error; }
-  if (value.modules !== undefined && (!Array.isArray(value.modules) || value.modules.length === 0 || value.modules.some(item => typeof item !== 'string' || !item.trim()))) { const error = new Error('modules must be a non-empty array of non-empty strings'); error.statusCode = 400; throw error; }
+  try { value = JSON.parse(raw); } catch { throw requestError('Request body must be valid JSON', 400, 'invalid_json'); }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw requestError('Request body must be a JSON object', 400, 'invalid_request_body');
+  const unknownFields = Object.keys(value).filter(key => key !== 'modules');
+  if (unknownFields.length) throw requestError(`Unsupported request field(s): ${unknownFields.join(', ')}`, 400, 'unknown_request_field');
+  if (value.modules !== undefined && (!Array.isArray(value.modules) || value.modules.length === 0 || value.modules.some(item => typeof item !== 'string' || !item.trim()))) throw requestError('modules must be a non-empty array of non-empty strings', 400, 'invalid_modules');
   return value;
 }
 
@@ -243,7 +258,7 @@ function routeApi(request, response, root, cliPath, pathname, cliTimeoutMs) {
   if (request.method === 'POST' && pathname === '/api/plan') return json(response, 200, publicPlan(plan(root, cliPath, cliTimeoutMs)));
   if (request.method === 'POST' && pathname === '/api/apply') {
     return readBody(request).then(raw => {
-      const body = parseApplyBody(raw);
+      const body = parseApplyBody(raw, request.headers['content-type']);
       const args = ['apply'];
       if (body.modules?.length) args.push('--only', body.modules.join(','));
       runCli(root, cliPath, args, cliTimeoutMs);

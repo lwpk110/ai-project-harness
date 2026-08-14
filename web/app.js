@@ -179,11 +179,19 @@ function render(data) {
 }
 
 async function request(url, options) {
-  const response = await fetch(url, options);
+  const response = await fetch(url, {
+    ...options,
+    headers: { accept: 'application/json', ...(options?.headers ?? {}) }
+  });
   const raw = await response.text();
   let body = {};
   try { body = raw ? JSON.parse(raw) : {}; } catch { body = {}; }
-  if (!response.ok) throw new Error(body.error?.message ?? `Request failed (${response.status})`);
+  if (!response.ok) {
+    const error = new Error(body.error?.message ?? `Request failed (${response.status})`);
+    error.code = body.error?.code;
+    error.status = response.status;
+    throw error;
+  }
   return body;
 }
 
