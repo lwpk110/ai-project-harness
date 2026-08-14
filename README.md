@@ -33,3 +33,4 @@ The kernel is runtime-neutral. Agent runtimes are optional Connector + Adapter p
 ## Implementation status
 
 The runnable v0.1 slice establishes the CLI, manifests, state model, audit report, and safe adoption flow. M1 parses configuration and manifests structurally, discovers bundled plugins from their manifests, and validates compatibility, dependencies, and duplicate contributions. M2 composes read-only, provenance-backed audit facts and findings from declarative official plugins. Planning recipes, typed operations, and permission execution remain the next migration stages.
+
