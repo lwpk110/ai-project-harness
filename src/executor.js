@@ -53,11 +53,13 @@ function mergeMappings(current, fragment, policy, prefix = '') {
 }
 
 function applyOperation(root, operation) {
+  const before = currentState(root, operation);
+  if (!isDeepStrictEqual(before, operation.precondition)) throw new Error(`Stale operation input for ${operation.path}`);
   const target = targetPath(root, operation.path);
   if (operation.type === 'directory.ensure') { ensureDir(target); return; }
   ensureDir(path.dirname(target));
   if (operation.type === 'file.create' || operation.type === 'file.replace') {
-    fs.writeFileSync(target, operation.content);
+    fs.writeFileSync(target, operation.content, operation.type === 'file.create' ? { flag: 'wx' } : undefined);
     return;
   }
   const source = fs.readFileSync(target, 'utf8');
@@ -111,13 +113,27 @@ function selectOperations(plan, only) {
   return plan.operations.filter(operation => requested.has(operation.module));
 }
 
-export function executePlan({ root, plan, currentInputs, only, commit }) {
+function validateSelectedReviews(plan, operations) {
+  let pending = 0;
+  for (const operation of operations) {
+    const reviews = (plan.reviews ?? []).filter(review => review.operation === operation.id);
+    if (!reviews.length) throw new Error(`Plan review is missing for ${operation.id}`);
+    if (reviews.length > 1) throw new Error(`Plan review is duplicated for ${operation.id}`);
+    if (reviews[0].status !== 'approved') pending += 1;
+  }
+  return pending;
+}
+
+export function executePlan({ root, plan, expectedPlan, currentInputs, only, commit }) {
   assertPlanIntegrity(plan);
   if (!isDeepStrictEqual(plan.inputs, currentInputs)) throw new Error('Plan inputs are stale; run harness plan again');
+  if (expectedPlan) {
+    assertPlanIntegrity(expectedPlan);
+    if (!isDeepStrictEqual(plan, expectedPlan)) throw new Error('Stored plan does not match the current generated plan; run harness plan again');
+  }
   const operations = selectOperations(plan, only);
-  const selected = new Set(operations.map(operation => operation.id));
-  const pending = plan.reviews.filter(review => selected.has(review.operation) && review.status !== 'approved');
-  if (pending.length) throw new Error(`Plan has ${pending.length} unapproved operation(s)`);
+  const pending = validateSelectedReviews(plan, operations);
+  if (pending) throw new Error(`Plan has ${pending} unapproved operation(s)`);
   validatePreconditions(root, operations);
   const snapshots = capture(root, operations);
   const recovery = path.join(root, '.harness', 'recovery', plan.id.replace(':', '-'));

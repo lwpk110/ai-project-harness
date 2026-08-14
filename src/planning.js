@@ -21,6 +21,10 @@ export function canonicalJson(value) {
   return JSON.stringify(canonicalize(value));
 }
 
+export function computePlanId(body) {
+  return sha256(canonicalJson(body));
+}
+
 function deepFreeze(value) {
   if (Array.isArray(value)) return Object.freeze(value.map(deepFreeze));
   if (isRecord(value)) return Object.freeze(Object.fromEntries(Object.entries(value).map(([key, item]) => [key, deepFreeze(item)])));
@@ -227,7 +231,7 @@ function planBody(plan) {
 
 export function assertPlanIntegrity(plan) {
   if (!isRecord(plan) || plan.schema !== 1 || plan.protocol !== 'harness.dev/plan/v1') throw new Error('Unsupported plan schema');
-  const expected = sha256(canonicalJson(planBody(plan)));
+  const expected = computePlanId(planBody(plan));
   if (plan.id !== expected) throw new Error('Plan integrity check failed');
   return true;
 }
@@ -260,5 +264,5 @@ export function buildPlan({ root, config, resolved, report }) {
     manualFindings: report.findings.filter(finding => !matchedFindings.has(finding.id)).map(finding => finding.id),
     status: reviews.every(review => review.status === 'approved') ? 'approved' : 'review-required'
   };
-  return deepFreeze({ id: sha256(canonicalJson(body)), ...body });
+  return deepFreeze({ id: computePlanId(body), ...body });
 }

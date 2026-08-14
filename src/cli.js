@@ -75,11 +75,14 @@ function apply(options = {}) {
   const state = loadState(); if (!state.plan) throw new Error('No plan found. Run harness plan first.');
   const config = parseConfig();
   const resolved = resolveEnabledPlugins(config);
+  const report = runAudit({ root, resolved });
+  const expectedPlan = buildPlan({ root, config, resolved, report });
   const verificationCommand = config.commands?.verify;
   if (!verificationCommand) throw new Error('commands.verify is required');
   const result = executePlan({
     root,
     plan: state.plan,
+    expectedPlan,
     currentInputs: inputDigests({ root, config, resolved }),
     only: options.only,
     commit(applied) {

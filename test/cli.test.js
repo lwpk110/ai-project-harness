@@ -6,7 +6,7 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { discoverBundledPlugins } from '../src/catalog.js';
 import { createProjectView, runAudit, validateAuditContributions } from '../src/audit.js';
-import { buildPlan, inputDigests, validatePlanningContributions } from '../src/planning.js';
+import { buildPlan, computePlanId, inputDigests, validatePlanningContributions } from '../src/planning.js';
 import { executePlan } from '../src/executor.js';
 import { parsePluginManifest, parseProjectConfig, stringifyProjectConfig } from '../src/manifest.js';
 
@@ -275,6 +275,33 @@ test('apply rejects stale or tampered immutable plans before changing files', ()
   run(pluginRoot, 'plan');
   fs.appendFileSync(path.join(pluginRoot, 'plugins', 'project-baseline', 'contributions', 'recipes', 'create-gitignore.yaml'), '\n');
   assert.throws(() => run(pluginRoot, 'apply'), /Plan inputs are stale/);
+
+  const forgedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-forged-'));
+  run(forgedRoot, 'init');
+  setVerifyCommand(forgedRoot, 'node -e "process.exit(0)"');
+  run(forgedRoot, 'plan');
+  const forgedStatePath = path.join(forgedRoot, '.harness', 'state.json');
+  const forgedState = JSON.parse(fs.readFileSync(forgedStatePath, 'utf8'));
+  forgedState.plan.operations.push({
+    id: 'forged/recipe/0',
+    module: 'docs',
+    provider: { plugin: 'forged', contribution: 'recipe' },
+    type: 'file.create',
+    path: 'forged.txt',
+    content: 'forged\n',
+    ownership: 'seeded',
+    precondition: { state: 'absent' }
+  });
+  forgedState.plan.reviews.push({
+    operation: 'forged/recipe/0',
+    permission: { kind: 'filesystem.write', value: 'forged.txt' },
+    status: 'approved',
+    reason: 'forged approval'
+  });
+  forgedState.plan.id = computePlanId((({ id, ...body }) => body)(forgedState.plan));
+  fs.writeFileSync(forgedStatePath, `${JSON.stringify(forgedState, null, 2)}\n`);
+  assert.throws(() => run(forgedRoot, 'apply'), /Stored plan does not match the current generated plan/);
+  assert.equal(fs.existsSync(path.join(forgedRoot, 'forged.txt')), false);
 });
 
 test('recipe validation covers the closed operation vocabulary and rejects unknown types', () => {
@@ -357,6 +384,56 @@ test('file operations execute through the kernel and record ownership', () => {
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(cwd, 'config.json'), 'utf8')), { existing: true, added: true });
   assert.equal(result.files['managed.txt'].ownership, 'managed');
   assert.equal(result.files['config.json'].ownership, 'structured-merge');
+});
+
+test('file creation is exclusive so concurrent writes fail safely', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-race-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-plugin-'));
+  fs.mkdirSync(path.join(directory, 'contributions', 'recipes'), { recursive: true });
+  fs.writeFileSync(path.join(directory, 'contributions', 'recipes', 'create.yaml'), 'apiVersion: harness.dev/v1\nkind: Recipe\nmetadata:\n  id: create\n  module: files\nwhen:\n  finding: example.trigger\noperations:\n  - { type: file.create, path: created.txt, content: "planned\\n", ownership: seeded }\n');
+  const manifest = { metadata: { version: '0.1.0' }, contributes: { recipes: ['create'] }, permissions: { filesystem: { write: ['created.txt'] } } };
+  const loaded = { directory, content: 'create-plugin', manifest };
+  const resolved = { ordered: ['example'], active: new Map([['example', loaded]]) };
+  const config = { integration: { auto_fix_max_priority: 'P2' } };
+  const plan = buildPlan({ root: cwd, config, resolved, report: { findings: [{ id: 'example.trigger', priority: 'P2' }] } });
+  const target = path.join(cwd, 'created.txt');
+  const originalWrite = fs.writeFileSync;
+  let injected = false;
+  fs.writeFileSync = function wrappedWrite(file, data, options) {
+    if (!injected && file === target) {
+      injected = true;
+      originalWrite.call(fs, file, 'concurrent\n');
+    }
+    return originalWrite.call(fs, file, data, options);
+  };
+  try {
+    assert.throws(() => executePlan({ root: cwd, plan, currentInputs: inputDigests({ root: cwd, config, resolved }) }), /Apply failed and rolled back/);
+  } finally {
+    fs.writeFileSync = originalWrite;
+  }
+  assert.equal(fs.existsSync(target), false);
+});
+
+test('executePlan rejects missing or duplicated review coverage', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-reviews-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-plugin-'));
+  fs.mkdirSync(path.join(directory, 'contributions', 'recipes'), { recursive: true });
+  fs.writeFileSync(path.join(directory, 'contributions', 'recipes', 'create.yaml'), 'apiVersion: harness.dev/v1\nkind: Recipe\nmetadata:\n  id: create\n  module: files\nwhen:\n  finding: example.trigger\noperations:\n  - { type: file.create, path: created.txt, content: "planned\\n", ownership: seeded }\n');
+  const manifest = { metadata: { version: '0.1.0' }, contributes: { recipes: ['create'] }, permissions: { filesystem: { write: ['created.txt'] } } };
+  const loaded = { directory, content: 'create-plugin', manifest };
+  const resolved = { ordered: ['example'], active: new Map([['example', loaded]]) };
+  const config = { integration: { auto_fix_max_priority: 'P2' } };
+  const plan = buildPlan({ root: cwd, config, resolved, report: { findings: [{ id: 'example.trigger', priority: 'P2' }] } });
+  const missingReviewPlan = { ...plan, reviews: [] };
+  missingReviewPlan.id = computePlanId((({ id, ...body }) => body)(missingReviewPlan));
+  assert.throws(() => executePlan({ root: cwd, plan: missingReviewPlan, currentInputs: inputDigests({ root: cwd, config, resolved }) }), /Plan review is missing/);
+  const duplicatedReviewPlan = { ...plan, reviews: [...plan.reviews, plan.reviews[0]] };
+  duplicatedReviewPlan.id = computePlanId((({ id, ...body }) => body)(duplicatedReviewPlan));
+  assert.throws(() => executePlan({
+    root: cwd,
+    plan: duplicatedReviewPlan,
+    currentInputs: inputDigests({ root: cwd, config, resolved })
+  }), /Plan review is duplicated/);
 });
 
 test('planning rejects conflicting targets and undeclared write permissions', () => {
