@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import test from 'node:test';
 import { createHarnessServer } from '../src/server.js';
 
@@ -26,6 +26,33 @@ async function openServer(root, options = {}) {
 
 async function closeServer(server) {
   await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+}
+
+async function launchCliServer(root) {
+  const child = spawn(process.execPath, [cli, 'serve', '--port', '0'], {
+    cwd: root,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true
+  });
+  const output = await new Promise((resolve, reject) => {
+    let stdout = '';
+    const timer = setTimeout(() => reject(new Error('CLI serve did not start within the timeout')), 5000);
+    child.stdout.on('data', chunk => {
+      stdout += chunk.toString();
+      if (/Harness web server: http:\/\/127\.0\.0\.1:\d+/.test(stdout)) {
+        clearTimeout(timer);
+        resolve(stdout);
+      }
+    });
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+    child.once('exit', code => {
+      if (code !== null) {
+        clearTimeout(timer);
+        reject(new Error(`CLI serve exited before startup with code ${code}`));
+      }
+    });
+  });
+  return { child, output };
 }
 
 test('HTTP backend serves health, frontend assets, and safe 404 responses', async t => {
@@ -53,6 +80,20 @@ test('HTTP backend serves health, frontend assets, and safe 404 responses', asyn
   const missing = await fetch(`${base}/api/not-found`);
   assert.equal(missing.status, 404);
   assert.equal((await missing.json()).error.code, 'not_found');
+});
+
+test('CLI serve starts the loopback HTTP surface', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-cli-serve-'));
+  run(root, 'init');
+  const { child, output } = await launchCliServer(root);
+  t.after(() => {
+    if (!child.killed) child.kill();
+  });
+  const port = Number(output.match(/127\.0\.0\.1:(\d+)/)?.[1]);
+  assert.ok(port > 0);
+  const health = await fetch(`http://127.0.0.1:${port}/api/health`);
+  assert.equal(health.status, 200);
+  assert.equal((await health.json()).protocol, 'harness.dev/http/v1');
 });
 
 test('frontend API drives audit, plan, and verified apply through the kernel CLI', async t => {
