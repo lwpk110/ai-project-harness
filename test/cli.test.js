@@ -195,4 +195,3 @@ test('ProjectView is an immutable snapshot that excludes harness internals', () 
   assert.equal(Object.isFrozen(view.entries), true);
   assert.deepEqual(view.entries, [{ path: 'README.md', type: 'file' }]);
 });
-

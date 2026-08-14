@@ -133,4 +133,3 @@ export function parsePluginManifest(source, expectedName, label = 'harness-plugi
   if (errors.length) throw new Error(`Invalid plugin ${expectedName ?? manifest.metadata?.name ?? '<unknown>'}: ${errors.join('; ')}`);
   return manifest;
 }
-

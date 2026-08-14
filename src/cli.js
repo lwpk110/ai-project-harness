@@ -196,4 +196,3 @@ try {
   else if (command === 'verify') verify();
   else help();
 } catch (error) { console.error(`harness: ${error.message}`); process.exitCode = 1; }
-
