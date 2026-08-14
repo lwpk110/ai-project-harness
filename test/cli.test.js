@@ -86,6 +86,15 @@ test('plugin management validates and toggles built-in plugins', () => {
   assert.throws(() => run(cwd, 'remove', 'spec-driven'), /Plugin is not configured/);
 });
 
+test('DeepSeek Harness is available as an optional connector plugin', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-'));
+  run(cwd, 'init');
+  assert.match(run(cwd, 'plugin', 'validate', 'deepseek-harness'), /Valid plugin deepseek-harness/);
+  run(cwd, 'add', 'deepseek-harness');
+  assert.match(run(cwd, 'doctor'), /OK/);
+  assert.match(fs.readFileSync(path.join(cwd, 'harness.yaml'), 'utf8'), /deepseek-harness: true/);
+});
+
 test('diff reports modified seeded files', () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-'));
   fs.writeFileSync(path.join(cwd, 'package.json'), '{}\n');

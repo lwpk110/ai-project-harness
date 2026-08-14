@@ -1,6 +1,8 @@
 # AI Project Harness
 
-AI Project Harness is a zero-runtime-dependency CLI for initializing and adopting a governed workspace for AI coding agents.
+AI Project Harness currently provides a zero-runtime-dependency CLI for initializing and adopting a governed workspace for AI coding agents.
+
+Its direction is a governed microkernel: the kernel owns permissions, plans, transactions, audit, ownership, and rollback; every project-specific capability is delivered by a plugin. See [Architecture](docs/architecture.md), [Plugin Architecture](docs/plugin-architecture.md), and [ADR 0001](docs/decisions/0001-every-product-capability-is-a-plugin.md).
 
 ## Quick start
 
@@ -24,4 +26,10 @@ node src/cli.js verify
 - `doctor`: validate configuration and plugin dependencies.
 - `verify`: run the configured verification command.
 
-The v0.1 implementation intentionally keeps plugin execution declarative. It establishes the protocol, state model, audit report, and safe adoption flow before adding external registries and executable third-party hooks.
+## Agent runtimes
+
+The kernel is runtime-neutral. Agent runtimes are optional Connector + Adapter plugins: the Connector declares the external capability and permissions, while the Adapter translates governed tasks and runtime events. The built-in `deepseek-harness` plugin declares planned headless and ACP integration with [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness); v0.1 records its capabilities and permissions without installing or executing it.
+
+## Implementation status
+
+The runnable v0.1 slice establishes the CLI, manifests, state model, audit report, and safe adoption flow. Plugin behavior is still partly hard-coded in `src/cli.js`; the documented migration first introduces structural discovery and read-only detector/rule composition, then governed recipes and typed operations, and only later hosted third-party execution and runtime adapters.

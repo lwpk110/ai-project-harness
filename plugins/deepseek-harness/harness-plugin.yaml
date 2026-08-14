@@ -1,0 +1,22 @@
+apiVersion: harness.dev/v1
+kind: Plugin
+metadata:
+  name: deepseek-harness
+  version: 0.1.0
+contributes:
+  connectors:
+    - deepseek-harness-headless
+    - deepseek-harness-acp
+permissions:
+  filesystem:
+    read:
+      - .
+    write:
+      - .
+  network:
+    hosts:
+      - api.deepseek.com
+  secrets:
+    - DEEPSEEK_API_KEY
+  commands:
+    - dsh

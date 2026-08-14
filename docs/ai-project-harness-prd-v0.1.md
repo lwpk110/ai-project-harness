@@ -4,7 +4,7 @@
 
 - 产品名称：AI Project Harness
 - 文档版本：v0.1
-- 文档状态：初稿，待技术评审和试点验证
+- 文档状态：架构方向已更新，待协议实现和试点验证
 - 目标读者：产品负责人、平台工程师、AI Agent 开发者、研发团队负责人
 
 ## 2. 背景与问题
@@ -33,7 +33,9 @@ AI Project Harness 是一个面向 AI agent 驱动开发项目的初始化、治
 
 核心原则：
 
-> Plugin 负责交付，Kernel 负责治理；Standard 规定什么结果可接受，Workflow 规定过程，Skill 规定 agent 如何工作，Connector 规定 agent 能连接什么。
+> Kernel 只负责机制和不变量；所有项目相关的产品能力都由 Plugin 交付。
+
+“一切皆插件”不包括 Kernel 自身。配置、插件解析、权限、审计、不可变计划、事务执行、文件归属、验证和回滚构成不可替换的信任根；技术栈检测、审计规则、改进配方、Standard、Workflow、Skill、Connector 和 Agent Adapter 均由插件贡献。
 
 ## 4. 目标与非目标
 
@@ -47,10 +49,12 @@ AI Project Harness 是一个面向 AI agent 驱动开发项目的初始化、治
 6. 团队可以以受控方式接入 GitHub MCP、浏览器、Figma、Jira 等 Connector。
 7. Harness、插件和生成文件可以独立升级，并能识别用户定制、展示 diff、执行迁移和回滚。
 8. 规范和流程不仅被写进提示词，还能被 CI、脚本和自动化检查执行。
+9. 新增技术栈、规则、项目变换或 agent runtime 时，无需在 Kernel 中增加产品专用条件分支。
 
 ### 4.2 非目标
 
 - 不在 v0.1 中实现新的 LLM 或 agent runtime。
+- 不复制或 fork DeepSeek Harness；运行时通过可选 Connector/Agent Adapter 接入。
 - 不替代 GitHub、Jira、Figma、CI 等外部系统。
 - 不要求所有项目采用同一种 Git 流程、文档框架或测试框架。
 - 不在 v0.1 中建设开放的商业插件市场。
@@ -72,7 +76,11 @@ AI Project Harness 是一个面向 AI agent 驱动开发项目的初始化、治
 
 ## 6. 产品概念模型
 
-### 6.1 四类贡献
+### 6.1 两个贡献平面
+
+插件是统一的安装、授权和升级单元，可以同时向项目平面和引擎平面贡献能力。
+
+#### 项目平面
 
 | 类型 | 定义 | 典型内容 | 主要验证方式 |
 |---|---|---|---|
@@ -83,6 +91,18 @@ AI Project Harness 是一个面向 AI agent 驱动开发项目的初始化、治
 
 插件是安装和升级单元，一个插件可以同时贡献四类内容。例如 `github-development` 插件可以同时贡献 GitHub PR Standard、Issue-to-PR Workflow、GitHub 操作 Skill 和 GitHub MCP Connector。
 
+#### 引擎平面
+
+| 类型 | 输入 | 输出 | 是否允许副作用 |
+|---|---|---|---|
+| Detector | 只读 ProjectView | 带证据的 Fact | 否 |
+| Rule | Fact 和策略配置 | Finding | 否 |
+| Recipe | Fact、Finding 和配置 | 类型化 Operation 提案 | 否 |
+| Verifier | 只读项目视图或已批准命令 | CheckResult | 仅允许声明的检查 |
+| Adapter | 受治理的项目上下文和任务 | 外部 runtime 事件与结果 | 仅允许已授权的进程外能力 |
+
+项目平面描述“项目获得什么”，引擎平面描述“Harness 如何观察、规划、验证和连接”。现有 `detect()`、`audit()`、`plan()` 和 agent 平台适配最终都由引擎平面贡献替代。
+
 ### 6.2 依赖方向
 
 ```text
@@ -91,7 +111,39 @@ Workflow → Standard
 Skill → Standard
 Connector 不依赖 Workflow 或 Skill
 Standard 不依赖具体执行过程
+
+Detector → Fact
+Rule: Fact → Finding
+Recipe: Fact + Finding → Operation[]
+Verifier: ProjectView → CheckResult[]
+Adapter: GovernedContext → RuntimeResult
 ```
+
+依赖关系只决定激活的拓扑顺序；独占 Provider、同名贡献和 Operation 冲突必须显式报错，不允许由文件扫描顺序或 import 顺序隐式决定。
+
+### 6.3 Capability Seam
+
+每项可替换能力由三种角色构成：
+
+- Definition：由 Kernel 协议定义的版本化接口和数据结构；
+- Provider：实现能力的插件贡献；
+- Consumer：通过接口使用能力的 Kernel pipeline 或其他插件。
+
+每项能力必须同时声明基数（单例、有序多项或按 key 多项）、选择和排序规则、失败与取消语义、权限、生命周期以及契约测试。Provider 不能导入其他 Provider 的内部实现。
+
+### 6.4 Agent Runtime Adapter
+
+Agent Runtime Adapter 是引擎平面贡献，也是 Kernel 与具体 agent runtime 之间的进程或协议边界。Connector 声明外部能力、健康检查和权限，Adapter 负责把项目事实、策略、工作目录和验证入口交给 runtime，并把执行结果、权限请求和审计事件映射回 Kernel。两者通常由同一个插件交付，但不能混为同一接口。
+
+首个适配目标为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)：
+
+- AI Project Harness 继续负责现有项目接入、文件归属、策略、升级、回滚和统一验证；
+- DeepSeek Harness 负责 agent loop、模型适配、工具、会话、上下文压缩、沙箱与执行；
+- 首阶段通过 `dsh --profile headless` 提供一次性任务执行；
+- 后续通过 ACP stdio 提供结构化会话、取消和权限请求；
+- DeepSeek Harness 始终作为可选的进程外依赖，不进入 Kernel 的 runtime dependencies。
+
+可借鉴其“一切皆插件”、能力 Definition/Provider/Consumer 分离、可逆生命周期，以及“模型可见信息可从日志重建”等原则；不引入 Cordis，也不把特定模型或 runtime 的配置固化到核心协议。
 
 ## 7. 典型用户流程
 
@@ -163,13 +215,16 @@ harness rollback
 Kernel 必须负责：
 
 - 解析和校验 `harness.yaml`；
-- 插件发现、安装、启用、禁用和卸载；
-- 依赖、版本和冲突解析；
-- 模板渲染、结构化合并和文件归属管理；
-- 生命周期 Hook 调度；
-- 权限声明和审批状态；
-- `doctor`、`diff`、`sync`、`verify`；
-- 更新事务、状态持久化和回滚。
+- 插件发现、安装、启用、禁用、卸载和确定性生命周期；
+- 依赖、版本、Provider 选择、排序和冲突解析；
+- Manifest、Fact、Finding、Plan、Operation 和 CheckResult 的结构化校验；
+- 权限审批和仅追加审计记录；
+- 不可变计划、过期输入检测和类型化 Operation 执行；
+- 模板渲染、结构化合并、文件归属和迁移；
+- 更新事务、状态持久化、验证和回滚；
+- 进程外插件的协议协商、超时、取消、输出限制和清理。
+
+Kernel 不得包含 Node、Python、GitHub、文档标准、原型复刻或具体 agent runtime 的业务判断。`audit`、`plan`、`apply` 和 `verify` 是 Kernel pipeline，但其中的 Detector、Rule、Recipe、Verifier 和 Adapter 来自插件。
 
 首版 CLI 命令：
 
@@ -229,14 +284,21 @@ policies:
 ```text
 plugin/
 ├─ harness-plugin.yaml
+├─ contributions/
+│  ├─ standards/
+│  ├─ workflows/
+│  ├─ skills/
+│  ├─ connectors/
+│  ├─ detectors/
+│  ├─ rules/
+│  ├─ recipes/
+│  ├─ verifiers/
+│  └─ adapters/
 ├─ templates/
 ├─ schemas/
 ├─ migrations/
-├─ hooks/
-├─ standards/
-├─ workflows/
-├─ skills/
-├─ connectors/
+├─ runtime/          # 可选，官方 bundled 或第三方 hosted 入口
+├─ tests/
 └─ README.md
 ```
 
@@ -262,6 +324,14 @@ contributes:
   workflows: []
   skills: []
   connectors: []
+  detectors: []
+  rules: []
+  recipes: []
+  verifiers: []
+  adapters: []
+
+runtime:
+  mode: declarative
 
 permissions:
   filesystem: {}
@@ -270,7 +340,31 @@ permissions:
   commands: []
 ```
 
-### 8.4 文件归属和升级
+Manifest 是可静态检查的控制平面；可执行入口是单独声明的数据平面。安全相关的未知字段必须拒绝，不能静默忽略。`harness.lock` 必须记录 Manifest 摘要、包完整性、来源、精确依赖、已批准权限、runtime 模式和迁移版本。
+
+不得继续使用正则字段匹配或未文档化的 YAML 子集解析配置和 Manifest。Kernel 必须完整解析文档，再按 `apiVersion` 做结构化校验。为避免自行实现 YAML 和安全关键 Schema 校验，v0.1 允许在评估后引入范围严格、固定版本、经过审计的 YAML parser 和 schema validator 作为 Kernel 基础依赖；这是对“runtime dependency-free”偏好的明确例外。技术栈框架、平台 SDK、agent runtime 和插件自身依赖不得因此进入 Kernel。
+
+### 8.4 组合与变更流水线
+
+```text
+discover → resolve → inspect permissions → lock → activate
+                                                │
+audit: ProjectView → Detector[] → Fact[] → Rule[] → Finding[]
+plan:  Fact[] + Finding[] → Recipe[] → Operation[] → 冲突/权限审查
+apply: 已批准不可变 Plan → snapshot → Kernel executor → verify → commit/rollback
+```
+
+流水线必须满足：
+
+- Fact 是观察结果，必须包含 evidence、Provider 和输入哈希；
+- Finding 是由 Rule 基于 Fact 得出的结论，不得伪装成事实；
+- Recipe 只能生成封闭且版本化的 Operation，不得直接写文件；
+- 首批 Operation 包括 `file.create`、`file.replace`、`structured.merge`、`directory.ensure`、`command.run` 和 `connector.configure`；
+- 路径必须是规范化的项目相对路径，Secret 只能以引用出现；
+- 相同项目哈希、配置、插件 lock 和协议版本必须产生相同 Plan；
+- `apply` 必须拒绝输入哈希过期、权限未批准或 Operation 类型未知的 Plan。
+
+### 8.5 文件归属和升级
 
 生成文件必须标注归属模式：
 
@@ -288,7 +382,7 @@ harness.lock       精确插件版本、来源和完整性校验
 
 若用户修改过受管理文件，更新不得静默覆盖。
 
-### 8.5 内置模块
+### 8.6 内置模块
 
 v0.1 至少提供以下官方模块：
 
@@ -298,8 +392,9 @@ v0.1 至少提供以下官方模块：
 - Testing：快速验证、全量验证、测试生成和覆盖率门禁；
 - GitHub：Issue、Branch、PR、Review、CI 状态和 GitHub MCP；
 - Prototype：浏览器采集、本地实现、响应式截图和视觉对比。
+- Runtime：DeepSeek Harness headless/ACP Connector 的声明式插件。
 
-### 8.6 Existing Project Adoption
+### 8.7 Existing Project Adoption
 
 现有项目接入是 v0.1 的一级能力。Harness 必须能够在不修改项目的前提下完成基线扫描，并生成结构化的项目画像和改进建议。
 
@@ -352,6 +447,24 @@ integration:
 
 v0.1 可以自动应用低风险、可逆的 P2/P3 改进；P0/P1 建议默认只生成计划并要求人工确认，生产凭据、权限和外部系统操作始终需要审批。
 
+### 8.8 DeepSeek Harness Connector
+
+内置 `deepseek-harness` 插件声明两个 Connector：
+
+- `deepseek-harness-headless`：面向一次性、无人值守任务；
+- `deepseek-harness-acp`：面向结构化会话、取消和权限请求。
+
+v0.1 只交付声明式 manifest、启用/禁用、校验和权限展示所需的元数据，不安装或执行 DeepSeek Harness，不读取 `DEEPSEEK_API_KEY`。可执行桥接依赖插件 Hook、lockfile 和权限审批能力，应在这些 Kernel 能力完成后实现。
+
+未来执行连接器必须满足：
+
+- 外部包版本及完整性写入 `harness.lock`；
+- 启动前展示命令、工作区写权限、网络域名和 Secret 名称；
+- 只传递 Secret 引用，不把凭据写入项目或状态文件；
+- 将项目根目录、生成的 agent 指令和统一验证命令显式交给 runtime；
+- headless 进程非零退出、ACP 协议错误、取消和权限拒绝均形成可审计结果；
+- 外部 runtime 不得绕过 `harness verify` 和项目策略。
+
 ## 9. Skill 规范
 
 每个 Skill 必须声明：
@@ -385,6 +498,16 @@ v0.1 可以自动应用低风险、可逆的 P2/P3 改进；P0/P1 建议默认�
 - 不允许插件读取任意环境变量；
 - 记录安装、更新、权限变化和外部操作审计日志。
 
+插件分为三种信任和执行等级：
+
+| 等级 | 执行方式 | 约束 |
+|---|---|---|
+| Declarative | Kernel 解析数据并执行 | 默认等级，无插件代码执行 |
+| Bundled | 官方插件通过公开 capability context 在进程内执行 | 使用与外部插件相同的协议和契约测试，不得导入 Kernel 私有模块 |
+| Hosted | 第三方插件或 runtime 在进程外执行 | 需要 lock、权限审批、协议协商、超时、取消、输出限制和进程树清理 |
+
+安装不等于激活。fetch、inspect、approve、install 和 activate 必须分离；新增可执行入口、扩大权限或改变文件归属模式时必须重新审批。任意阶段失败或取消都必须按相反顺序释放已注册的生命周期 effect。
+
 ## 11. 验证与评测
 
 ### 11.1 项目验证
@@ -407,22 +530,27 @@ v0.1 可以自动应用低风险、可逆的 P2/P3 改进；P0/P1 建议默认�
 
 ### 必须包含
 
-1. Kernel/CLI 基础命令；
-2. `harness.yaml`、lockfile 和插件 Manifest；
-3. 现有项目 `adopt/audit/plan/apply` 流程；
-4. 技术栈、工具链、文档、CI、Git 和 agent 配置扫描；
-5. 差距报告、P0-P3 建议和集成计划；
-6. 本地/Git 插件来源；
-7. 依赖、冲突和版本解析；
-8. 三种文件归属模式；
-9. `install/sync/verify/migrate` 生命周期；
-10. `update --plan`、事务更新和回滚；
-11. 权限声明和 `doctor`；
-12. Git、Spec、Docs、GitHub、Prototype 五个官方插件。
+1. Kernel/CLI 基础命令和公开的 contribution protocol；
+2. 插件 Manifest 的结构化解析、Schema 校验和由 Manifest 生成的 bundled catalog；
+3. 删除手工维护的内置插件名称列表，官方插件走相同的发现、校验和启用路径；
+4. `harness.yaml`、最小 lock 信息、插件状态和兼容性检查；
+5. 只读 ProjectView、Fact、Detector、Rule 和 Finding contract；
+6. 由官方插件提供技术栈、工具链、文档、CI、Git 和 agent 配置扫描；
+7. 带 evidence 和 Provider provenance 的 P0-P3 差距报告；
+8. Recipe、不可变 Plan 和首批类型化文件 Operation；
+9. 保留现有文件的 `audit → plan → apply`，包含输入哈希、recovery snapshot 和文件归属；
+10. Verifier contract、`doctor` 和统一 `verify`；
+11. 权限元数据校验和 Plan 级权限审查，不执行未批准命令、网络或 Secret 操作；
+12. Git、Spec、Docs、GitHub、Prototype、DeepSeek Harness 六个官方声明式插件及其契约测试。
 
 ### 暂不包含
 
 - 公共插件市场和在线评分；
+- 任意第三方代码的进程内加载；
+- Hosted executable plugin protocol 和进程监督器；
+- 完整的远程 registry、签名、SemVer 求解和供应链策略；
+- 插件迁移和跨版本事务更新；
+- DeepSeek Harness headless/ACP 的实际执行；
 - 多租户组织管理；
 - 复杂的多 agent 运行时编排；
 - 自动批准生产操作；
@@ -430,41 +558,48 @@ v0.1 可以自动应用低风险、可逆的 P2/P3 改进；P0/P1 建议默认�
 
 ## 13. 验收标准
 
-一个全新的 Node Web 项目满足以下条件时，认为 MVP 可交付：
+v0.1 满足以下条件时可交付：
 
-1. 执行一次 `harness init` 可以完成基础初始化；
-2. 可以启用或关闭 Git、Spec、Docs、GitHub、Prototype 模块；
-3. 所有生成文件有明确插件归属；
-4. 修改受管理文件后，`harness update --plan` 能识别并展示冲突；
-5. 插件新增权限时，CLI 会阻止静默安装并要求确认；
-6. `harness verify` 与 CI 使用同一套检查入口；
-7. 更新迁移失败时可以恢复到更新前状态；
-8. Codex、Claude Code 至少有两个 agent adapter，能读取同一份项目事实来源；
-9. 五个官方插件均有最小安装测试和至少一个 eval；
-10. 一个已有 Node Web 项目执行 `harness audit` 不修改工作区，并输出可读的项目画像和差距报告；
-11. `harness plan` 能把至少三条建议转换为包含文件、风险和验证命令的集成计划；
-12. `harness apply --only ...` 只修改用户选择的模块，并支持失败恢复；
-13. 文档、配置 Schema 和 CLI 帮助可独立阅读，不依赖模型记忆。
+1. 新增 bundled declarative plugin 不需要修改 `src/cli.js`；
+2. 官方插件与项目插件使用相同 Manifest、贡献协议、校验器和 catalog；
+3. 新增技术栈检测或审计规则只需要新增 Detector/Rule contribution 和契约测试；
+4. `harness audit` 使用只读 ProjectView，不修改工作区，并为 Fact 和 Finding 输出 evidence 与 Provider；
+5. 相同项目哈希、配置和插件 lock 产生内容一致的 Plan；
+6. Recipe 只能产生已知 Operation，插件不能在 `plan` 阶段直接写文件；
+7. `apply` 只执行已批准且未过期的 Plan，保留现有文件，并记录 recovery、ownership 和 provenance；
+8. 未声明或未批准的 filesystem、command、network 和 secret 能力被拒绝；
+9. `harness verify` 与 CI 使用同一验证入口，Verifier 结果包含 Provider；
+10. DeepSeek Harness 插件可被发现、校验、启用和禁用，但不会安装外部包、读取凭据或执行 runtime；
+11. 核心 capability contract、六个官方插件和 adopt 流程均有自动化测试；
+12. 架构、协议、配置 Schema、CLI 帮助和当前实现差距可独立阅读。
 
 ## 14. 版本路线
 
-### v0.1：核心闭环与现有项目接入
+### v0.1：插件内核与安全接入闭环
 
-完成 Kernel、CLI、插件协议、文件状态、锁定版本、更新计划、回滚、现有项目审计/集成闭环和五个官方插件。
+完成 M0-M3：统一术语和 ADR、Manifest/catalog、Detector/Rule 只读组合、Recipe/Operation 受治理变更，以及六个官方声明式插件。v0.1 不执行第三方插件代码。
 
-### v0.2：组织化使用
+### v0.2：生命周期、升级与 Hosted Plugin
 
-增加组织级 preset、私有 registry、插件签名、allowlist、审计导出和更多 agent adapter。
+完成 M4：完整 lockfile、依赖求解、权限差异、迁移、事务更新/回滚、进程外协议和进程监督器。增加组织 preset、私有 registry、签名和 allowlist。
 
-### v0.3：生态能力
+### v0.3：Agent Runtime Adapter
 
-增加插件搜索、发布、版本评分、兼容性测试矩阵和社区插件审核流程。
+完成 M5：先交付 DeepSeek Harness headless，再交付 ACP；Codex 和 Claude Code 使用同一个 GovernedContext、审计结果和验证策略。
+
+### v0.4：生态能力
+
+增加插件搜索、发布、版本评分、兼容性测试矩阵、审计导出和社区插件审核流程。
 
 ## 15. 主要风险
 
 | 风险 | 影响 | 应对 |
 |---|---|---|
 | 插件 API 过早固化 | 后续难以演进 | v0.1 使用 `apiVersion`，限制 API 面，提供兼容层 |
+| “一切皆插件”削弱治理 | 插件绕过权限、计划或回滚 | Kernel 作为不可替换信任根；插件只能提议 Operation，副作用由 Kernel 执行 |
+| 官方插件拥有隐式特权 | 外部生态无法复用真实能力 | built-in parity；官方插件使用公开协议、catalog 和契约测试 |
+| Provider 顺序不确定 | 相同配置产生不同结果 | 依赖拓扑、显式 priority、独占 Provider 冲突和 lockfile |
+| 第三方代码在进程内执行 | 凭据泄露或任意文件修改 | 默认 declarative；第三方可执行能力仅允许 hosted process |
 | 生成文件覆盖用户修改 | 数据丢失和信任下降 | 文件归属、基线哈希、diff、事务和回滚 |
 | 插件供应链风险 | 密钥泄露或越权操作 | 权限声明、签名、锁定版本、allowlist |
 | 配置选项过多 | 初始化和接入复杂 | preset + 分层覆盖 + `doctor` + 审计报告 |
@@ -478,12 +613,20 @@ AI Project Harness 的最小稳定内核不是一套 Prompt，而是：
 ```text
 Kernel
 ├─ Plugin protocol
-├─ Configuration and lockfile
-├─ Dependency/conflict resolver
+├─ Configuration, catalog and lockfile
+├─ Dependency/provider resolver
+├─ Capability registry and lifecycle
+├─ Permission broker and audit log
+├─ Fact/finding and immutable plan protocols
+├─ Typed-operation transaction executor
 ├─ File ownership and migration
-├─ Permission and audit
-├─ Sync/verify/update/rollback
-└─ Agent adapters
+└─ Verify/update/rollback
+
+Plugins
+├─ Detectors, rules, recipes and verifiers
+├─ Standards, workflows, skills and connectors
+├─ Templates and structured merges
+└─ Agent runtime adapters
 ```
 
-所有项目规范、开发流程、任务能力和外部连接都通过插件贡献给 Kernel。这样可以持续集成新的规范和 Skill，同时保持项目可审查、可验证、可升级和可回滚。
+Kernel 只定义机制、数据 contract 和不可绕过的不变量。所有项目知识、策略和平台行为都通过插件贡献；官方插件与外部插件使用相同协议。这样可以持续接入新的技术栈、规范、Skill 和 runtime，同时保持项目可审查、可验证、可升级和可回滚。

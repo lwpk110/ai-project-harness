@@ -11,7 +11,7 @@ const harnessDir = path.join(root, '.harness');
 const configPath = path.join(root, 'harness.yaml');
 const lockPath = path.join(root, 'harness.lock');
 const statePath = path.join(harnessDir, 'state.json');
-const builtins = ['git-conventions', 'documentation', 'spec-driven', 'github-development', 'prototype-replication'];
+const builtins = ['git-conventions', 'documentation', 'spec-driven', 'github-development', 'prototype-replication', 'deepseek-harness'];
 
 function readText(file) { return fs.readFileSync(file, 'utf8'); }
 function exists(file) { return fs.existsSync(file); }
