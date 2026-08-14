@@ -1,6 +1,6 @@
 # AI Project Harness
 
-AI Project Harness currently provides a zero-runtime-dependency CLI for initializing and adopting a governed workspace for AI coding agents.
+AI Project Harness provides a CLI for initializing and adopting a governed workspace for AI coding agents.
 
 Its direction is a governed microkernel: the kernel owns permissions, plans, transactions, audit, ownership, and rollback; every project-specific capability is delivered by a plugin. See [Architecture](docs/architecture.md), [Plugin Architecture](docs/plugin-architecture.md), and [ADR 0001](docs/decisions/0001-every-product-capability-is-a-plugin.md).
 

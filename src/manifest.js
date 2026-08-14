@@ -47,6 +47,7 @@ export function parseProjectConfig(source, label = 'harness.yaml') {
   for (const [name, entry] of Object.entries(config.plugins ?? {})) {
     if (!isNonEmptyString(name)) errors.push('plugins contains an empty name');
     if (typeof entry !== 'boolean' && !isRecord(entry)) errors.push(`plugins.${name} must be a boolean or mapping`);
+    if (isRecord(entry) && 'enabled' in entry && typeof entry.enabled !== 'boolean') errors.push(`plugins.${name}.enabled must be a boolean`);
   }
   if (errors.length) throw new Error(`${label}: ${errors.join('; ')}`);
   return {

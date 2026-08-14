@@ -100,8 +100,10 @@ function apply(options = {}) {
   }
   state.appliedAt = new Date().toISOString(); state.files = {}; for (const file of ['AGENTS.md', '.gitignore']) if (exists(path.join(root, file))) state.files[file] = { hash: sha256(readText(path.join(root, file))), ownership: 'seeded' }; saveState(state); console.log(`Applied ${changes.length} changes. Recovery: ${recovery}`);
 }
+let _builtinPluginNames;
 function builtinPluginNames() {
-  return discoverBundledPlugins(builtinPluginsDir);
+  if (!_builtinPluginNames) _builtinPluginNames = discoverBundledPlugins(builtinPluginsDir);
+  return _builtinPluginNames;
 }
 function isBuiltinPlugin(name) { return builtinPluginNames().includes(name); }
 function requireBuiltinPlugin(name) { if (!isBuiltinPlugin(name)) throw new Error(`Unknown built-in plugin: ${name ?? ''}`); }
@@ -128,8 +130,9 @@ function pluginManifestFile(name) {
   requireBuiltinPlugin(name);
   const projectFile = path.join(root, 'plugins', name, 'harness-plugin.yaml');
   const builtinFile = path.join(builtinPluginsDir, name, 'harness-plugin.yaml');
-  const file = exists(projectFile) ? projectFile : builtinFile;
-  return { file, source: file === projectFile ? 'project' : 'builtin' };
+  if (exists(projectFile)) return { file: projectFile, source: 'project' };
+  if (exists(builtinFile)) return { file: builtinFile, source: 'builtin' };
+  throw new Error(`Manifest not found for plugin: ${name}`);
 }
 function loadPluginManifest(name) {
   const descriptor = pluginManifestFile(name);
