@@ -1,0 +1,12 @@
+apiVersion: harness.dev/v1
+kind: Rule
+metadata:
+  id: gitignore-missing
+when:
+  fact: project.has-gitignore
+  equals: false
+finding:
+  id: gitignore.missing
+  priority: P2
+  title: 缺少 .gitignore
+  action: 生成基础 .gitignore

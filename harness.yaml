@@ -1,11 +1,12 @@
 schema: 1
 project:
   mode: new
-  detected: [object Object]
+  detected: []
 integration:
   policy: preserve-existing
   auto_fix_max_priority: P2
 plugins:
+  project-baseline: true
   spec-driven: true
 commands:
   verify: "npm test"

@@ -1,0 +1,12 @@
+apiVersion: harness.dev/v1
+kind: Rule
+metadata:
+  id: agent-instructions-missing
+when:
+  fact: project.agent-instructions
+  equals: []
+finding:
+  id: agents.instructions
+  priority: P2
+  title: 缺少项目级 agent 指令
+  action: 生成 AGENTS.md，记录项目地图和验证命令

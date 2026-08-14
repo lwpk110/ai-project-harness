@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { discoverBundledPlugins } from '../src/catalog.js';
+import { createProjectView } from '../src/audit.js';
 import { parsePluginManifest, parseProjectConfig, stringifyProjectConfig } from '../src/manifest.js';
 
 const cli = path.resolve('src/cli.js');
@@ -43,7 +44,7 @@ test('plugin dependencies are enabled in topological lock order', () => {
   assert.equal(config.plugins['spec-driven'], true);
   run(cwd, 'sync');
   const lock = JSON.parse(fs.readFileSync(path.join(cwd, 'harness.lock'), 'utf8'));
-  assert.deepEqual(lock.order, ['documentation', 'spec-driven']);
+  assert.deepEqual(lock.order, ['documentation', 'project-baseline', 'spec-driven']);
 });
 
 test('plugin compatibility and contribution uniqueness fail before activation', () => {
@@ -95,7 +96,7 @@ test('sync locks plugin manifests and doctor detects manifest drift', () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-'));
   run(cwd, 'init');
   run(cwd, 'add', 'spec-driven');
-  assert.match(run(cwd, 'sync'), /Synchronized 1 plugin lock entries/);
+  assert.match(run(cwd, 'sync'), /Synchronized 2 plugin lock entries/);
   const lock = JSON.parse(fs.readFileSync(path.join(cwd, 'harness.lock'), 'utf8'));
   assert.equal(lock.schema, 1);
   assert.equal(lock.plugins['spec-driven'].version, '0.1.0');
@@ -156,4 +157,41 @@ test('diff reports modified seeded files', () => {
   run(cwd, 'apply');
   fs.appendFileSync(path.join(cwd, 'AGENTS.md'), 'Changed by the project.\n');
   assert.deepEqual(JSON.parse(run(cwd, 'diff')), { changes: [{ file: 'AGENTS.md', status: 'modified', ownership: 'seeded' }] });
+});
+
+test('audit is a read-only, provenance-backed composition of plugin facts and rules', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-'));
+  fs.writeFileSync(path.join(cwd, 'package.json'), '{}\n');
+  run(cwd, 'init');
+  const report = JSON.parse(run(cwd, 'audit', '--format', 'json'));
+  const stack = report.facts.find(fact => fact.id === 'project.stack');
+  const testing = report.findings.find(finding => finding.id === 'testing.missing');
+  assert.deepEqual(stack.value, 'node');
+  assert.deepEqual(stack.provider, { plugin: 'project-baseline', contribution: 'project-baseline' });
+  assert.deepEqual(testing.provider, { plugin: 'project-baseline', contribution: 'testing-missing' });
+  assert.deepEqual(testing.facts, ['project.has-tests']);
+  assert.equal(fs.existsSync(path.join(cwd, '.harness', 'state.json')), false);
+});
+
+test('a project plugin contribution can add an audit rule without changing the CLI', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-'));
+  run(cwd, 'init');
+  fs.cpSync(path.resolve('plugins', 'project-baseline'), path.join(cwd, 'plugins', 'project-baseline'), { recursive: true });
+  const manifest = path.join(cwd, 'plugins', 'project-baseline', 'harness-plugin.yaml');
+  fs.writeFileSync(manifest, fs.readFileSync(manifest, 'utf8').replace(/(    - gitignore-missing)\r?\n/, '$1\n    - readme-missing\n'));
+  fs.writeFileSync(path.join(cwd, 'plugins', 'project-baseline', 'contributions', 'rules', 'readme-missing.yaml'), 'apiVersion: harness.dev/v1\nkind: Rule\nmetadata:\n  id: readme-missing\nwhen:\n  fact: project.has-docs\n  equals: false\nfinding:\n  id: project.readme-missing\n  priority: P3\n  title: README is missing\n  action: Add a project README\n');
+  const report = JSON.parse(run(cwd, 'audit', '--format', 'json'));
+  assert.deepEqual(report.findings.find(finding => finding.id === 'project.readme-missing').provider, { plugin: 'project-baseline', contribution: 'readme-missing' });
+  assert.ok(report.findings.some(finding => finding.id === 'testing.missing'));
+});
+
+test('ProjectView is an immutable snapshot that excludes harness internals', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-view-'));
+  fs.mkdirSync(path.join(cwd, '.harness'));
+  fs.mkdirSync(path.join(cwd, 'node_modules', 'ignored'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, 'README.md'), '# Readme\n');
+  const view = createProjectView(cwd);
+  assert.equal(Object.isFrozen(view), true);
+  assert.equal(Object.isFrozen(view.entries), true);
+  assert.deepEqual(view.entries, [{ path: 'README.md', type: 'file' }]);
 });

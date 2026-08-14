@@ -1,0 +1,12 @@
+apiVersion: harness.dev/v1
+kind: Rule
+metadata:
+  id: stack-unknown
+when:
+  fact: project.stack
+  equals: unknown
+finding:
+  id: stack.unknown
+  priority: P1
+  title: 无法识别项目技术栈
+  action: 在 harness.yaml 中补充 project.detected

@@ -1,0 +1,16 @@
+apiVersion: harness.dev/v1
+kind: Plugin
+metadata:
+  name: project-baseline
+  version: 0.1.0
+  description: Baseline read-only project facts and adoption findings.
+contributes:
+  detectors:
+    - project-baseline
+  rules:
+    - stack-unknown
+    - testing-missing
+    - agent-instructions-missing
+    - docs-missing
+    - gitignore-missing
+permissions: {}
