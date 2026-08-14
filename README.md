@@ -8,7 +8,7 @@ Its direction is a governed microkernel: the kernel owns permissions, plans, tra
 
 ```bash
 npm install
-node src/cli.js init --preset minimal
+node src/cli.js init --preset agent-project --agents codex,claude --ci github
 node src/cli.js audit --format markdown
 node src/cli.js plan
 node src/cli.js apply
@@ -17,9 +17,16 @@ node src/cli.js doctor
 node src/cli.js verify
 ```
 
+`init` without a preset (or with `--preset minimal`) keeps the adoption-compatible
+minimal flow: it creates the Harness configuration and baseline agent instructions.
+Use `agent-project`, `startup-web`, or `backend-service` when creating a new project;
+these presets also generate the runtime-neutral `agent/` surface, package metadata,
+and optional GitHub Actions verification workflow. Initialization is idempotent and
+never overwrites existing project files.
+
 ## Commands
 
-- `init`: create a new harness configuration and baseline files.
+- `init`: initialize a Harness project. Use an explicit non-minimal preset to generate a complete AI Agent project scaffold.
 - `adopt` / `audit`: inspect an existing project without changing it.
 - `plan`: turn audit findings into an integration plan.
 - `apply`: apply selected low-risk changes with a recovery snapshot.

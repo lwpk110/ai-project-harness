@@ -33,6 +33,34 @@ test('project configuration preserves nested plugin settings through structured 
   assert.throws(() => parseProjectConfig('plugins:\n  spec-driven: enabled\n'), /plugins.spec-driven must be a boolean or mapping/);
 });
 
+test('init creates an idempotent runtime-neutral AI agent project scaffold', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-agent-project-'));
+  run(cwd, 'init', '--preset', 'agent-project', '--agents', 'codex,claude', '--ci', 'github');
+  const expected = [
+    'harness.yaml',
+    'AGENTS.md',
+    'README.md',
+    '.gitignore',
+    'package.json',
+    'package-lock.json',
+    'agent/README.md',
+    'agent/workflows/governed-change.md',
+    'agent/skills/project-verification/SKILL.md',
+    'agent/connectors/README.md',
+    '.github/workflows/verify.yml'
+  ];
+  for (const file of expected) assert.equal(fs.existsSync(path.join(cwd, file)), true, file);
+  const config = parseProjectConfig(fs.readFileSync(path.join(cwd, 'harness.yaml'), 'utf8'));
+  assert.equal(config.project.preset, 'agent-project');
+  assert.deepEqual(config.project.agents, ['codex', 'claude']);
+  assert.match(fs.readFileSync(path.join(cwd, 'AGENTS.md'), 'utf8'), /audit -> plan -> apply -> verify/);
+  const agentsBefore = fs.readFileSync(path.join(cwd, 'AGENTS.md'), 'utf8');
+  run(cwd, 'init', '--preset', 'agent-project', '--agents', 'codex,claude', '--ci', 'github');
+  assert.equal(fs.readFileSync(path.join(cwd, 'AGENTS.md'), 'utf8'), agentsBefore);
+  assert.match(run(cwd, 'doctor'), /OK/);
+  assert.match(run(cwd, 'verify'), /Harness verify: OK/);
+});
+
 test('manifest validation rejects unknown permission fields and invalid contributions', () => {
   const base = 'apiVersion: harness.dev/v1\nkind: Plugin\nmetadata:\n  name: example\n  version: 0.1.0\n';
   assert.throws(() => parsePluginManifest(`${base}permissions:\n  network:\n    hosts: []\n    bypass: true\n`, 'example'), /permissions.network.bypass is not supported/);
