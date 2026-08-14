@@ -160,7 +160,12 @@ export function inputDigests({ root, config, resolved }) {
 }
 
 function pathPermissionAllows(patterns, target) {
-  return patterns.some(pattern => pattern === '.' || pattern === target || (pattern.endsWith('/**') && target.startsWith(pattern.slice(0, -3))));
+  return patterns.some(pattern => {
+    if (pattern === '.' || pattern === target) return true;
+    if (!pattern.endsWith('/**')) return false;
+    const prefix = pattern.slice(0, -3);
+    return target === prefix || target.startsWith(`${prefix}/`);
+  });
 }
 
 function operationPermission(operation, recipe) {

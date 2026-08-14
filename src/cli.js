@@ -75,12 +75,15 @@ function apply(options = {}) {
   const state = loadState(); if (!state.plan) throw new Error('No plan found. Run harness plan first.');
   const config = parseConfig();
   const resolved = resolveEnabledPlugins(config);
+  const verificationCommand = config.commands?.verify;
+  if (!verificationCommand) throw new Error('commands.verify is required');
   const result = executePlan({
     root,
     plan: state.plan,
     currentInputs: inputDigests({ root, config, resolved }),
     only: options.only,
     commit(applied) {
+      runVerificationCommand(verificationCommand);
       state.applied = applied;
       state.appliedAt = applied.appliedAt;
       state.files = { ...(state.files ?? {}), ...applied.files };
@@ -185,7 +188,8 @@ function setPluginEnabled(name, enabled) { const config = parseConfig(); if (ena
 function removePlugin(name) { requireBuiltinPlugin(name); const config = parseConfig(); if (!Object.hasOwn(config.plugins, name)) throw new Error(`Plugin is not configured: ${name}`); delete config.plugins[name]; resolveEnabledPlugins(config); saveConfig(config); console.log(`Removed plugin ${name}`); }
 function diff() { const state = loadState(); const changes = []; for (const [file, record] of Object.entries(state.files ?? {})) { const current = path.join(root, file); const currentHash = exists(current) ? sha256(readText(current)) : null; if (currentHash !== record.hash) changes.push({ file, status: exists(current) ? 'modified' : 'deleted', ownership: record.ownership }); } console.log(JSON.stringify({ changes }, null, 2)); return changes; }
 function doctor() { const config = parseConfig(); const errors = []; try { const resolved = resolveEnabledPlugins(config); validateAuditContributions(resolved); validatePlanningContributions(resolved); } catch (error) { errors.push(error.message); } for (const name of Object.keys(config.plugins ?? {})) { if (!isBuiltinPlugin(name)) { errors.push(`Unknown plugin: ${name}`); continue; } try { validatePlugin(name); } catch (error) { errors.push(error.message); } } const lock = loadLock(); if (lock && lock.schema !== 1) errors.push('harness.lock schema must be 1'); if (lock) for (const [name, entry] of Object.entries(lock.plugins ?? {})) { try { if (entry.integrity !== `sha256:${sha256(pluginManifest(name))}`) errors.push(`Lock integrity mismatch: ${name}`); } catch (error) { errors.push(error.message); } } if (!config.commands?.verify) errors.push('commands.verify is required'); if (errors.length) { console.error([...new Set(errors)].join('\n')); process.exitCode = 1; } else console.log('Harness doctor: OK'); }
-function verify() { const config = parseConfig(); const command = config.commands?.verify; if (!command) throw new Error('commands.verify is required'); if (process.platform === 'win32') execSync(command, { cwd: root, stdio: 'inherit' }); else { const [bin, ...args] = splitCommand(command); execFileSync(bin, args, { cwd: root, stdio: 'inherit' }); } console.log('Harness verify: OK'); }
+function runVerificationCommand(command) { if (process.platform === 'win32') execSync(command, { cwd: root, stdio: 'inherit' }); else { const [bin, ...args] = splitCommand(command); execFileSync(bin, args, { cwd: root, stdio: 'inherit' }); } }
+function verify() { const config = parseConfig(); const command = config.commands?.verify; if (!command) throw new Error('commands.verify is required'); runVerificationCommand(command); console.log('Harness verify: OK'); }
 function help() { console.log('harness init | adopt | audit | plan | apply | add <plugin> | remove <plugin> | enable <plugin> | disable <plugin> | plugin list|info|validate <plugin> | diff | sync | doctor | verify'); }
 
 const { command, options, positional } = parseArgs(process.argv.slice(2));

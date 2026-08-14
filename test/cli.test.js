@@ -12,6 +12,10 @@ import { parsePluginManifest, parseProjectConfig, stringifyProjectConfig } from 
 
 const cli = path.resolve('src/cli.js');
 function run(cwd, ...args) { return execFileSync(process.execPath, [cli, ...args], { cwd, encoding: 'utf8' }); }
+function setVerifyCommand(cwd, command) {
+  const file = path.join(cwd, 'harness.yaml');
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('verify: "npm test"', `verify: '${command}'`));
+}
 
 test('bundled plugin catalog discovers manifests without a name list', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-catalog-'));
@@ -67,6 +71,7 @@ test('adopt audit plan apply keeps existing files and creates missing baseline',
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-'));
   fs.writeFileSync(path.join(cwd, 'package.json'), '{"scripts":{"test":"node -e \\"console.log(1)\\"}}\n');
   run(cwd, 'init');
+  setVerifyCommand(cwd, 'node -e "process.exit(0)"');
   run(cwd, 'audit', '--format', 'json');
   run(cwd, 'plan');
   run(cwd, 'apply');
@@ -77,6 +82,7 @@ test('adopt audit plan apply keeps existing files and creates missing baseline',
 test('apply --only limits adoption changes to selected modules', () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-'));
   run(cwd, 'init');
+  setVerifyCommand(cwd, 'node -e "process.exit(0)"');
   fs.rmSync(path.join(cwd, 'AGENTS.md'));
   run(cwd, 'audit');
   run(cwd, 'plan');
@@ -154,6 +160,7 @@ test('diff reports modified seeded files', () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-'));
   fs.writeFileSync(path.join(cwd, 'package.json'), '{}\n');
   run(cwd, 'init');
+  setVerifyCommand(cwd, 'node -e "process.exit(0)"');
   run(cwd, 'audit');
   run(cwd, 'plan');
   run(cwd, 'apply');
@@ -316,6 +323,19 @@ test('commands remain review-gated without an execution broker', () => {
   assert.throws(() => executePlan({ root: cwd, plan, currentInputs: inputDigests({ root: cwd, config, resolved }) }), /unapproved operation/);
 });
 
+test('apply runs verification before committing and rolls back on verify failure', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-verify-'));
+  run(cwd, 'init');
+  fs.rmSync(path.join(cwd, 'AGENTS.md'));
+  setVerifyCommand(cwd, 'node -e "process.exit(1)"');
+  run(cwd, 'plan');
+  assert.throws(() => run(cwd, 'apply'), /Apply failed and rolled back/);
+  assert.equal(fs.existsSync(path.join(cwd, 'AGENTS.md')), false);
+  assert.equal(fs.existsSync(path.join(cwd, '.gitignore')), false);
+  const state = JSON.parse(fs.readFileSync(path.join(cwd, '.harness', 'state.json'), 'utf8'));
+  assert.equal(state.applied, undefined);
+});
+
 test('file operations execute through the kernel and record ownership', () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-files-'));
   fs.writeFileSync(path.join(cwd, 'managed.txt'), 'before\n');
@@ -355,4 +375,17 @@ test('planning rejects conflicting targets and undeclared write permissions', ()
   loaded.manifest.permissions.filesystem.write = [];
   assert.throws(() => buildPlan({ root: cwd, config, resolved, report }), /may not write undeclared path shared.txt/);
   assert.throws(() => validatePlanningContributions(resolved), /may not write undeclared path shared.txt/);
+});
+
+test('planning permission boundaries do not treat sibling prefixes as descendants', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-permissions-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-plugin-'));
+  fs.mkdirSync(path.join(directory, 'contributions', 'recipes'), { recursive: true });
+  fs.writeFileSync(path.join(directory, 'contributions', 'recipes', 'scoped.yaml'), 'apiVersion: harness.dev/v1\nkind: Recipe\nmetadata:\n  id: scoped\n  module: test\nwhen:\n  finding: example.trigger\noperations:\n  - { type: file.create, path: generated2/out.txt, content: blocked, ownership: seeded }\n');
+  const config = { integration: { auto_fix_max_priority: 'P2' } };
+  const report = { findings: [{ id: 'example.trigger', priority: 'P2' }] };
+  const loaded = { directory, manifest: { metadata: { version: '0.1.0' }, contributes: { recipes: ['scoped'] }, permissions: { filesystem: { write: ['generated/**'] } } } };
+  const resolved = { ordered: ['example'], active: new Map([['example', loaded]]) };
+  assert.throws(() => buildPlan({ root: cwd, config, resolved, report }), /may not write undeclared path generated2\/out.txt/);
+  assert.throws(() => validatePlanningContributions(resolved), /may not write undeclared path generated2\/out.txt/);
 });
