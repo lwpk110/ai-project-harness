@@ -27,6 +27,20 @@ test('plugins can be enabled from an empty configuration', () => {
   assert.match(fs.readFileSync(path.join(cwd, 'harness.yaml'), 'utf8'), /spec-driven: true/);
 });
 
+test('sync locks plugin manifests and doctor detects manifest drift', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-'));
+  run(cwd, 'init');
+  run(cwd, 'add', 'spec-driven');
+  assert.match(run(cwd, 'sync'), /Synchronized 1 plugin lock entries/);
+  const lock = JSON.parse(fs.readFileSync(path.join(cwd, 'harness.lock'), 'utf8'));
+  assert.equal(lock.schema, 1);
+  assert.equal(lock.plugins['spec-driven'].version, '0.1.0');
+  assert.match(lock.plugins['spec-driven'].integrity, /^sha256:/);
+  fs.mkdirSync(path.join(cwd, 'plugins', 'spec-driven'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, 'plugins', 'spec-driven', 'harness-plugin.yaml'), 'apiVersion: harness.dev/v1\nkind: Plugin\nmetadata:\n  name: spec-driven\n  version: 9.9.9\n');
+  assert.throws(() => run(cwd, 'doctor'), /Lock integrity mismatch: spec-driven/);
+});
+
 test('verify executes npm commands on Windows', () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-'));
   run(cwd, 'init');
