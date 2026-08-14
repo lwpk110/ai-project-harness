@@ -4,6 +4,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { discoverBundledPlugins } from './catalog.js';
+import { parsePluginManifest, parseProjectConfig, stringifyProjectConfig } from './manifest.js';
 
 const root = process.cwd();
 const moduleDir = fileURLToPath(new URL('.', import.meta.url));
@@ -11,7 +13,8 @@ const harnessDir = path.join(root, '.harness');
 const configPath = path.join(root, 'harness.yaml');
 const lockPath = path.join(root, 'harness.lock');
 const statePath = path.join(harnessDir, 'state.json');
-const builtins = ['git-conventions', 'documentation', 'spec-driven', 'github-development', 'prototype-replication'];
+const builtinPluginsDir = path.join(moduleDir, '..', 'plugins');
+const harnessVersion = JSON.parse(readText(path.join(moduleDir, '..', 'package.json'))).version;
 
 function readText(file) { return fs.readFileSync(file, 'utf8'); }
 function exists(file) { return fs.existsSync(file); }
@@ -32,46 +35,11 @@ function parseArgs(argv) {
 
 function parseConfig() {
   if (!exists(configPath)) throw new Error('harness.yaml not found. Run harness init first.');
-  const config = { plugins: {}, project: {}, integration: {}, commands: {}, policies: {} };
-  let section = '';
-  for (const raw of readText(configPath).split(/\r?\n/)) {
-    const line = raw.replace(/\s+#.*$/, '');
-    if (!line.trim() || line.trim().startsWith('#')) continue;
-    const indent = line.length - line.trimStart().length;
-    const match = line.trim().match(/^([^:]+):\s*(.*)$/);
-    if (!match) continue;
-    const [, key, value] = match;
-    if (indent === 0) { section = key.trim(); if (value) config[section] = scalar(value); }
-    else if (indent === 2) {
-      if (section === 'plugins') config.plugins[key.trim()] = { enabled: scalar(value || 'true') };
-      else if (config[section] && typeof config[section] === 'object') config[section][key.trim()] = scalar(value);
-    }
-  }
-  return config;
-}
-function scalar(value) {
-  const v = value.trim();
-  if (!v) return {};
-  if (v === '{}') return {};
-  if (v === 'true') return true;
-  if (v === 'false') return false;
-  if (/^\d+$/.test(v)) return Number(v);
-  return v.replace(/^['"]|['"]$/g, '');
+  return parseProjectConfig(readText(configPath), configPath);
 }
 function saveConfig(config) {
-  const lines = ['schema: 1', 'project:'];
-  for (const [k, v] of Object.entries(config.project ?? {})) lines.push(`  ${k}: ${format(v)}`);
-  lines.push('integration:');
-  for (const [k, v] of Object.entries(config.integration ?? {})) lines.push(`  ${k}: ${format(v)}`);
-  lines.push('plugins:');
-  for (const [k, v] of Object.entries(config.plugins ?? {})) lines.push(`  ${k}: ${format(v.enabled ?? true)}`);
-  lines.push('commands:');
-  for (const [k, v] of Object.entries(config.commands ?? {})) lines.push(`  ${k}: ${format(v)}`);
-  lines.push('policies:');
-  for (const [k, v] of Object.entries(config.policies ?? {})) lines.push(`  ${k}: ${format(v)}`);
-  write(configPath, `${lines.join('\n')}\n`);
+  write(configPath, stringifyProjectConfig(config));
 }
-function format(v) { return typeof v === 'string' && /\s/.test(v) ? JSON.stringify(v) : String(v); }
 function splitCommand(command) { const parts = []; let current = ''; let quote = ''; let escaped = false; for (const char of command.trim()) { if (escaped) { current += char; escaped = false; } else if (char === '\\' && quote === '"') escaped = true; else if (quote) { if (char === quote) quote = ''; else current += char; } else if (char === '"' || char === "'") quote = char; else if (/\s/.test(char)) { if (current) { parts.push(current); current = ''; } } else current += char; } if (escaped) current += '\\'; if (quote) throw new Error('Unterminated quote in verification command'); if (current) parts.push(current); return parts; }
 function loadState() { return exists(statePath) ? JSON.parse(readText(statePath)) : { files: {}, audit: null, plan: null }; }
 function loadLock() { return exists(lockPath) ? JSON.parse(readText(lockPath)) : null; }
@@ -132,17 +100,102 @@ function apply(options = {}) {
   }
   state.appliedAt = new Date().toISOString(); state.files = {}; for (const file of ['AGENTS.md', '.gitignore']) if (exists(path.join(root, file))) state.files[file] = { hash: sha256(readText(path.join(root, file))), ownership: 'seeded' }; saveState(state); console.log(`Applied ${changes.length} changes. Recovery: ${recovery}`);
 }
-function addPlugin(name) { if (!builtins.includes(name)) throw new Error(`Unknown built-in plugin: ${name}`); const config = parseConfig(); config.plugins[name] = { enabled: true }; saveConfig(config); console.log(`Enabled plugin ${name}`); }
-function pluginManifestFile(name) { const projectFile = path.join(root, 'plugins', name, 'harness-plugin.yaml'); const builtinFile = path.join(moduleDir, '..', 'plugins', name, 'harness-plugin.yaml'); const file = exists(projectFile) ? projectFile : builtinFile; if (!exists(file)) throw new Error(`Plugin manifest not found: ${name}`); return { file, source: file === projectFile ? 'project' : 'builtin' }; }
-function pluginManifest(name) { return readText(pluginManifestFile(name).file); }
-function manifestField(manifest, field) { const match = manifest.match(new RegExp(`^\\s*${field}:\\s*(.+)$`, 'm')); return match?.[1]?.trim().replace(/^['"]|['"]$/g, ''); }
-function validatePlugin(name) { const manifest = pluginManifest(name); const apiVersion = manifestField(manifest, 'apiVersion'); const kind = manifestField(manifest, 'kind'); const pluginName = manifestField(manifest, 'name'); const version = manifestField(manifest, 'version'); const errors = []; if (apiVersion !== 'harness.dev/v1') errors.push('apiVersion must be harness.dev/v1'); if (kind !== 'Plugin') errors.push('kind must be Plugin'); if (pluginName !== name) errors.push(`metadata.name must be ${name}`); if (!version) errors.push('metadata.version is required'); if (errors.length) throw new Error(`Invalid plugin ${name}: ${errors.join('; ')}`); return { name: pluginName, version, apiVersion, kind }; }
-function syncLock() { const config = parseConfig(); const plugins = {}; for (const name of Object.keys(config.plugins ?? {}).sort()) { const manifest = pluginManifest(name); const detail = validatePlugin(name); plugins[name] = { version: detail.version, source: pluginManifestFile(name).source, integrity: `sha256:${sha256(manifest)}` }; } const lock = { schema: 1, plugins }; saveLock(lock); console.log(`Synchronized ${Object.keys(plugins).length} plugin lock entries`); return lock; }
-function pluginCommand(action, name) { const config = parseConfig(); if (action === 'list') { for (const item of builtins) { const entry = config.plugins?.[item]; const enabled = entry === true || entry?.enabled === true; let version = 'invalid'; try { version = validatePlugin(item).version; } catch {} console.log(`${item}\t${enabled ? 'enabled' : 'disabled'}\t${version}`); } return; } if (!name || !builtins.includes(name)) throw new Error(`Unknown built-in plugin: ${name ?? ''}`); if (action === 'info') { console.log(JSON.stringify(validatePlugin(name), null, 2)); return; } if (action === 'validate') { console.log(`Valid plugin ${name} (${validatePlugin(name).version})`); return; } throw new Error(`Unknown plugin action: ${action}`); }
-function setPluginEnabled(name, enabled) { if (!builtins.includes(name)) throw new Error(`Unknown built-in plugin: ${name}`); const config = parseConfig(); if (!config.plugins[name]) config.plugins[name] = { enabled }; else config.plugins[name].enabled = enabled; saveConfig(config); console.log(`${enabled ? 'Enabled' : 'Disabled'} plugin ${name}`); }
-function removePlugin(name) { if (!builtins.includes(name)) throw new Error(`Unknown built-in plugin: ${name ?? ''}`); const config = parseConfig(); if (!config.plugins[name]) throw new Error(`Plugin is not configured: ${name}`); delete config.plugins[name]; saveConfig(config); console.log(`Removed plugin ${name}`); }
+let _builtinPluginNames;
+function builtinPluginNames() {
+  if (!_builtinPluginNames) _builtinPluginNames = discoverBundledPlugins(builtinPluginsDir);
+  return _builtinPluginNames;
+}
+function isBuiltinPlugin(name) { return builtinPluginNames().includes(name); }
+function requireBuiltinPlugin(name) { if (!isBuiltinPlugin(name)) throw new Error(`Unknown built-in plugin: ${name ?? ''}`); }
+function pluginEnabled(entry) { return entry === true || (entry !== null && typeof entry === 'object' && entry.enabled === true); }
+function parseVersion(value) { const match = String(value).match(/^(\d+)\.(\d+)(?:\.(\d+))?$/); if (!match) throw new Error(`Unsupported semantic version: ${value}`); return match.slice(1).map(part => Number(part ?? 0)); }
+function compareVersions(left, right) { const leftParts = parseVersion(left); const rightParts = parseVersion(right); for (let index = 0; index < 3; index += 1) { if (leftParts[index] !== rightParts[index]) return leftParts[index] - rightParts[index]; } return 0; }
+function satisfiesVersionRange(version, range) {
+  const comparators = String(range).trim().split(/\s+/).filter(Boolean);
+  if (!comparators.length) throw new Error('Compatibility range cannot be empty');
+  return comparators.every(comparator => {
+    const match = comparator.match(/^(>=|<=|>|<|=)?(\d+\.\d+(?:\.\d+)?)$/);
+    if (!match) throw new Error(`Unsupported compatibility comparator: ${comparator}`);
+    const comparison = compareVersions(version, match[2]);
+    switch (match[1] ?? '=') {
+      case '>': return comparison > 0;
+      case '>=': return comparison >= 0;
+      case '<': return comparison < 0;
+      case '<=': return comparison <= 0;
+      default: return comparison === 0;
+    }
+  });
+}
+function pluginManifestFile(name) {
+  requireBuiltinPlugin(name);
+  const projectFile = path.join(root, 'plugins', name, 'harness-plugin.yaml');
+  const builtinFile = path.join(builtinPluginsDir, name, 'harness-plugin.yaml');
+  if (exists(projectFile)) return { file: projectFile, source: 'project' };
+  if (exists(builtinFile)) return { file: builtinFile, source: 'builtin' };
+  throw new Error(`Manifest not found for plugin: ${name}`);
+}
+function loadPluginManifest(name) {
+  const descriptor = pluginManifestFile(name);
+  const content = readText(descriptor.file);
+  return { ...descriptor, content, manifest: parsePluginManifest(content, name, descriptor.file) };
+}
+function pluginManifest(name) { return loadPluginManifest(name).content; }
+function validatePlugin(name) {
+  const { manifest } = loadPluginManifest(name);
+  const compatibility = manifest.compatibility?.harness;
+  if (compatibility && !satisfiesVersionRange(harnessVersion, compatibility)) throw new Error(`Plugin ${name} requires harness ${compatibility}, current version is ${harnessVersion}`);
+  return { name: manifest.metadata.name, version: manifest.metadata.version, apiVersion: manifest.apiVersion, kind: manifest.kind };
+}
+function pluginDependencies(loaded) { return Object.keys(loaded.manifest.dependencies?.plugins ?? {}).sort(); }
+function resolveEnabledPlugins(config) {
+  const enabled = new Set(Object.entries(config.plugins ?? {}).filter(([, entry]) => pluginEnabled(entry)).map(([name]) => name));
+  const active = new Map();
+  const ordered = [];
+  const visiting = new Set();
+  function visit(name) {
+    if (active.has(name)) return;
+    if (visiting.has(name)) throw new Error(`Plugin dependency cycle: ${[...visiting, name].join(' -> ')}`);
+    requireBuiltinPlugin(name);
+    if (!enabled.has(name)) throw new Error(`Plugin dependency is not enabled: ${name}`);
+    visiting.add(name);
+    const loaded = loadPluginManifest(name);
+    validatePlugin(name);
+    for (const dependency of pluginDependencies(loaded)) visit(dependency);
+    visiting.delete(name);
+    active.set(name, loaded);
+    ordered.push(name);
+  }
+  for (const name of [...enabled].sort()) visit(name);
+  const contributions = new Map();
+  for (const name of ordered) {
+    for (const [kind, ids] of Object.entries(active.get(name).manifest.contributes ?? {})) {
+      for (const id of ids) {
+        const key = `${kind}/${id}`;
+        if (contributions.has(key)) throw new Error(`Contribution ${key} is provided by both ${contributions.get(key)} and ${name}`);
+        contributions.set(key, name);
+      }
+    }
+  }
+  return { active, ordered };
+}
+function enablePluginWithDependencies(name, config, visiting = new Set()) {
+  if (visiting.has(name)) throw new Error(`Plugin dependency cycle: ${[...visiting, name].join(' -> ')}`);
+  requireBuiltinPlugin(name);
+  visiting.add(name);
+  const loaded = loadPluginManifest(name);
+  validatePlugin(name);
+  for (const dependency of pluginDependencies(loaded)) enablePluginWithDependencies(dependency, config, visiting);
+  visiting.delete(name);
+  const entry = config.plugins[name];
+  config.plugins[name] = entry !== null && typeof entry === 'object' ? { ...entry, enabled: true } : true;
+}
+function addPlugin(name) { const config = parseConfig(); enablePluginWithDependencies(name, config); resolveEnabledPlugins(config); saveConfig(config); console.log(`Enabled plugin ${name}`); }
+function syncLock() { const config = parseConfig(); const resolved = resolveEnabledPlugins(config); const plugins = {}; for (const name of resolved.ordered) { const loaded = resolved.active.get(name); plugins[name] = { version: loaded.manifest.metadata.version, source: loaded.source, integrity: `sha256:${sha256(loaded.content)}` }; } const lock = { schema: 1, order: resolved.ordered, plugins }; saveLock(lock); console.log(`Synchronized ${Object.keys(plugins).length} plugin lock entries`); return lock; }
+function pluginCommand(action, name) { const config = parseConfig(); if (action === 'list') { for (const item of builtinPluginNames()) { const enabled = pluginEnabled(config.plugins?.[item]); let version = 'invalid'; try { version = validatePlugin(item).version; } catch {} console.log(`${item}\t${enabled ? 'enabled' : 'disabled'}\t${version}`); } return; } requireBuiltinPlugin(name); if (action === 'info') { console.log(JSON.stringify(validatePlugin(name), null, 2)); return; } if (action === 'validate') { console.log(`Valid plugin ${name} (${validatePlugin(name).version})`); return; } throw new Error(`Unknown plugin action: ${action}`); }
+function setPluginEnabled(name, enabled) { const config = parseConfig(); if (enabled) enablePluginWithDependencies(name, config); else { requireBuiltinPlugin(name); const entry = config.plugins[name]; config.plugins[name] = entry !== null && typeof entry === 'object' ? { ...entry, enabled: false } : false; } resolveEnabledPlugins(config); saveConfig(config); console.log(`${enabled ? 'Enabled' : 'Disabled'} plugin ${name}`); }
+function removePlugin(name) { requireBuiltinPlugin(name); const config = parseConfig(); if (!Object.hasOwn(config.plugins, name)) throw new Error(`Plugin is not configured: ${name}`); delete config.plugins[name]; resolveEnabledPlugins(config); saveConfig(config); console.log(`Removed plugin ${name}`); }
 function diff() { const state = loadState(); const changes = []; for (const [file, record] of Object.entries(state.files ?? {})) { const current = path.join(root, file); const currentHash = exists(current) ? sha256(readText(current)) : null; if (currentHash !== record.hash) changes.push({ file, status: exists(current) ? 'modified' : 'deleted', ownership: record.ownership }); } console.log(JSON.stringify({ changes }, null, 2)); return changes; }
-function doctor() { const config = parseConfig(); const errors = []; for (const name of Object.keys(config.plugins ?? {})) { if (!builtins.includes(name)) { errors.push(`Unknown plugin: ${name}`); continue; } try { validatePlugin(name); } catch (error) { errors.push(error.message); } } const lock = loadLock(); if (lock && lock.schema !== 1) errors.push('harness.lock schema must be 1'); if (lock) for (const [name, entry] of Object.entries(lock.plugins ?? {})) { try { if (entry.integrity !== `sha256:${sha256(pluginManifest(name))}`) errors.push(`Lock integrity mismatch: ${name}`); } catch (error) { errors.push(error.message); } } if (!config.commands?.verify) errors.push('commands.verify is required'); if (errors.length) { console.error(errors.join('\n')); process.exitCode = 1; } else console.log('Harness doctor: OK'); }
+function doctor() { const config = parseConfig(); const errors = []; try { resolveEnabledPlugins(config); } catch (error) { errors.push(error.message); } for (const name of Object.keys(config.plugins ?? {})) { if (!isBuiltinPlugin(name)) { errors.push(`Unknown plugin: ${name}`); continue; } try { validatePlugin(name); } catch (error) { errors.push(error.message); } } const lock = loadLock(); if (lock && lock.schema !== 1) errors.push('harness.lock schema must be 1'); if (lock) for (const [name, entry] of Object.entries(lock.plugins ?? {})) { try { if (entry.integrity !== `sha256:${sha256(pluginManifest(name))}`) errors.push(`Lock integrity mismatch: ${name}`); } catch (error) { errors.push(error.message); } } if (!config.commands?.verify) errors.push('commands.verify is required'); if (errors.length) { console.error([...new Set(errors)].join('\n')); process.exitCode = 1; } else console.log('Harness doctor: OK'); }
 function verify() { const config = parseConfig(); const command = config.commands?.verify; if (!command) throw new Error('commands.verify is required'); if (process.platform === 'win32') execSync(command, { cwd: root, stdio: 'inherit' }); else { const [bin, ...args] = splitCommand(command); execFileSync(bin, args, { cwd: root, stdio: 'inherit' }); } console.log('Harness verify: OK'); }
 function help() { console.log('harness init | adopt | audit | plan | apply | add <plugin> | remove <plugin> | enable <plugin> | disable <plugin> | plugin list|info|validate <plugin> | diff | sync | doctor | verify'); }
 
