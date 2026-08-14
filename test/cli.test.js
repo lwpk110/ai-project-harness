@@ -19,6 +19,18 @@ test('adopt audit plan apply keeps existing files and creates missing baseline',
   assert.equal(fs.existsSync(path.join(cwd, '.harness', 'state.json')), true);
 });
 
+test('apply --only limits adoption changes to selected modules', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-'));
+  run(cwd, 'init');
+  fs.rmSync(path.join(cwd, 'AGENTS.md'));
+  run(cwd, 'audit');
+  run(cwd, 'plan');
+  assert.match(run(cwd, 'apply', '--only', 'git'), /Applied 1 changes/);
+  assert.equal(fs.existsSync(path.join(cwd, '.gitignore')), true);
+  assert.equal(fs.existsSync(path.join(cwd, 'AGENTS.md')), false);
+  assert.throws(() => run(cwd, 'apply', '--only', 'unknown'), /Unknown apply module: unknown/);
+});
+
 test('plugins can be enabled from an empty configuration', () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-'));
   run(cwd, 'init');
