@@ -7,7 +7,7 @@ const excludedDirectories = new Set(['.git', '.harness', 'node_modules', 'plugin
 const contributionKinds = new Set(['Detector', 'Rule']);
 
 function freezeArray(items) {
-  return Object.freeze(items.map(item => Object.freeze(item)));
+  return Object.freeze(items.map(item => freezeValue(item)));
 }
 
 function freezeValue(value) {
@@ -54,18 +54,18 @@ function selectFact(view, selector, label) {
   if (selector.type === 'all-existing') {
     const existing = existingPaths(view);
     const matches = selector.paths.filter(item => existing.has(item));
-    return { value: matches, evidence: matches.map(path => ({ path })) };
+    return { value: matches, evidence: matches.map(p => ({ path: p })) };
   }
   if (selector.type === 'any-path') {
     const existing = existingPaths(view);
     const matches = selector.paths.filter(item => existing.has(item));
-    return { value: matches.length > 0, evidence: matches.map(path => ({ path })) };
+    return { value: matches.length > 0, evidence: matches.map(p => ({ path: p })) };
   }
   if (selector.type === 'path-contains') {
     const matches = view.entries
       .filter(entry => selector.types.includes(entry.type) && selector.terms.some(term => entry.path.toLowerCase().includes(term.toLowerCase())))
       .map(entry => entry.path);
-    return { value: matches.length > 0, evidence: matches.map(path => ({ path })) };
+    return { value: matches.length > 0, evidence: matches.map(p => ({ path: p })) };
   }
   throw new Error(`${label}: unsupported selector type ${selector.type}`);
 }
