@@ -39,6 +39,20 @@ test('plugins can be enabled from an empty configuration', () => {
   assert.match(fs.readFileSync(path.join(cwd, 'harness.yaml'), 'utf8'), /spec-driven: true/);
 });
 
+test('each official plugin passes the install and lockfile eval', () => {
+  const plugins = ['git-conventions', 'documentation', 'spec-driven', 'github-development', 'prototype-replication'];
+  for (const plugin of plugins) {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-'));
+    run(cwd, 'init');
+    assert.match(run(cwd, 'plugin', 'validate', plugin), new RegExp(`Valid plugin ${plugin}`));
+    run(cwd, 'add', plugin);
+    run(cwd, 'sync');
+    const lock = JSON.parse(fs.readFileSync(path.join(cwd, 'harness.lock'), 'utf8'));
+    assert.equal(lock.plugins[plugin].version, '0.1.0');
+    assert.match(lock.plugins[plugin].integrity, /^sha256:/);
+  }
+});
+
 test('sync locks plugin manifests and doctor detects manifest drift', () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-'));
   run(cwd, 'init');
