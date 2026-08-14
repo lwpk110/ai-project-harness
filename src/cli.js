@@ -3,8 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const root = process.cwd();
+const moduleDir = fileURLToPath(new URL('.', import.meta.url));
 const harnessDir = path.join(root, '.harness');
 const configPath = path.join(root, 'harness.yaml');
 const statePath = path.join(harnessDir, 'state.json');
@@ -74,7 +76,7 @@ function saveState(state) { ensureDir(harnessDir); write(statePath, `${JSON.stri
 function projectFiles() { return fs.readdirSync(root, { withFileTypes: true }).filter(e => !['.git', '.harness', 'node_modules'].includes(e.name)).map(e => e.name); }
 
 function init() {
-  if (!exists(configPath)) write(configPath, readText(path.join(import.meta.dirname, '..', 'harness.yaml')));
+  if (!exists(configPath)) write(configPath, readText(path.join(moduleDir, '..', 'harness.yaml')));
   ensureDir(harnessDir);
   if (!exists(path.join(root, 'AGENTS.md'))) write(path.join(root, 'AGENTS.md'), '# Agent instructions\n\nRun the project verification command before delivery.\n');
   console.log(`Initialized AI Project Harness in ${root}`);
@@ -124,7 +126,7 @@ function apply() {
   state.appliedAt = new Date().toISOString(); state.files = {}; for (const file of ['AGENTS.md', '.gitignore']) if (exists(path.join(root, file))) state.files[file] = { hash: sha256(readText(path.join(root, file))), ownership: 'seeded' }; saveState(state); console.log(`Applied ${state.plan.changes.length} changes. Recovery: ${recovery}`);
 }
 function addPlugin(name) { if (!builtins.includes(name)) throw new Error(`Unknown built-in plugin: ${name}`); const config = parseConfig(); config.plugins[name] = { enabled: true }; saveConfig(config); console.log(`Enabled plugin ${name}`); }
-function pluginManifest(name) { const projectFile = path.join(root, 'plugins', name, 'harness-plugin.yaml'); const builtinFile = path.join(import.meta.dirname, '..', 'plugins', name, 'harness-plugin.yaml'); const file = exists(projectFile) ? projectFile : builtinFile; if (!exists(file)) throw new Error(`Plugin manifest not found: ${name}`); return readText(file); }
+function pluginManifest(name) { const projectFile = path.join(root, 'plugins', name, 'harness-plugin.yaml'); const builtinFile = path.join(moduleDir, '..', 'plugins', name, 'harness-plugin.yaml'); const file = exists(projectFile) ? projectFile : builtinFile; if (!exists(file)) throw new Error(`Plugin manifest not found: ${name}`); return readText(file); }
 function manifestField(manifest, field) { const match = manifest.match(new RegExp(`^\\s*${field}:\\s*(.+)$`, 'm')); return match?.[1]?.trim().replace(/^['"]|['"]$/g, ''); }
 function validatePlugin(name) { const manifest = pluginManifest(name); const apiVersion = manifestField(manifest, 'apiVersion'); const kind = manifestField(manifest, 'kind'); const pluginName = manifestField(manifest, 'name'); const version = manifestField(manifest, 'version'); const errors = []; if (apiVersion !== 'harness.dev/v1') errors.push('apiVersion must be harness.dev/v1'); if (kind !== 'Plugin') errors.push('kind must be Plugin'); if (pluginName !== name) errors.push(`metadata.name must be ${name}`); if (!version) errors.push('metadata.version is required'); if (errors.length) throw new Error(`Invalid plugin ${name}: ${errors.join('; ')}`); return { name: pluginName, version, apiVersion, kind }; }
 function pluginCommand(action, name) { const config = parseConfig(); if (action === 'list') { for (const item of builtins) { const entry = config.plugins?.[item]; const enabled = entry === true || entry?.enabled === true; let version = 'invalid'; try { version = validatePlugin(item).version; } catch {} console.log(`${item}\t${enabled ? 'enabled' : 'disabled'}\t${version}`); } return; } if (!name || !builtins.includes(name)) throw new Error(`Unknown built-in plugin: ${name ?? ''}`); if (action === 'info') { console.log(JSON.stringify(validatePlugin(name), null, 2)); return; } if (action === 'validate') { console.log(`Valid plugin ${name} (${validatePlugin(name).version})`); return; } throw new Error(`Unknown plugin action: ${action}`); }
