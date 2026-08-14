@@ -85,13 +85,12 @@ The project borrows plugin composition, Definition/Provider/Consumer capability 
 
 ## Current Implementation
 
-The runnable v0.1 slice proves the CLI and safe adoption flow, but it is not yet the target microkernel:
+The runnable v0.1 slice proves the CLI and safe adoption flow. M1 has also replaced Manifest field matching with structural YAML parsing, discovers bundled plugins from their manifests, and validates compatibility, enabled dependency order, and duplicate contribution ids. It is not yet the target microkernel:
 
-- built-in plugin names are hard-coded;
-- manifests are inspected with field matching rather than structural validation;
 - detection, audit, planning, and application rules live in `src/cli.js`;
 - permissions are declared but not enforced;
 - plugins cannot register providers or lifecycle effects;
-- executable adapters, lockfile resolution, migrations, and transactional rollback are deferred.
+- the lockfile records manifest integrity but does not yet resolve remote sources or migrations;
+- executable adapters, hosted plugins, and transactional rollback are deferred.
 
 New work should follow the milestones in [Plugin Architecture](plugin-architecture.md#migration-roadmap) and should not add new project-specific branches to the CLI when a contribution point can own the behavior.

@@ -251,7 +251,7 @@ Third-party executable providers run out of process. The host protocol grants na
 
 ## Built-in Plugin Parity
 
-The `builtins` array in the current CLI is transitional. The target implementation discovers bundled manifests from an internal plugin catalog generated and validated at build time. `plugin list`, `add`, `doctor`, dependency resolution, and tests consume that catalog rather than a hand-maintained name list.
+The `builtins` array has been removed. The current implementation discovers bundled manifests from the packaged plugin directory and validates them before use. `plugin list`, `add`, `doctor`, dependency resolution, and tests consume that catalog rather than a hand-maintained name list. A generated build-time index may later optimize distribution, but it must remain a derivative of the same manifests.
 
 Official plugins must not receive hidden contribution types or relaxed validation. This ensures that built-ins continuously exercise the public ecosystem path.
 
@@ -278,12 +278,12 @@ Adapters cannot mark work complete merely because the external agent exited succ
 
 Exit criterion: new design work uses the common kernel, plugin, contribution, fact, finding, recipe, operation, and adapter vocabulary.
 
-### M1: Manifest and discovery foundation
+### M1: Manifest and discovery foundation (implemented)
 
-- Replace ad hoc manifest field matching with structural parsing and schema validation.
-- Generate the bundled plugin catalog from manifests.
+- Replace ad hoc configuration and Manifest field matching with structural YAML parsing and validation.
+- Discover the bundled plugin catalog from manifests.
 - Remove the hard-coded `builtins` list.
-- Add dependency ordering, compatibility checks, and contribution-id uniqueness.
+- Add enabled dependency ordering, compatibility checks, and contribution-id uniqueness.
 
 Exit criterion: adding a declarative built-in plugin requires no `src/cli.js` edit.
 
@@ -324,12 +324,11 @@ Exit criterion: the same project plan and verification policy can be executed by
 
 The current v0.1 slice intentionally falls short of this target:
 
-- built-in names are hard-coded;
-- manifest parsing is field matching rather than structural validation;
+- catalog discovery and validation are local-only; registry resolution, signatures, and broad SemVer support are deferred;
 - detector and audit logic live in the CLI;
 - plan recipes and apply behavior are hard-coded;
 - permission declarations are not yet enforced;
 - plugins cannot yet register providers or lifecycle effects;
-- lockfile, migrations, hosted execution, and transactional rollback are deferred.
+- lockfile source resolution, migrations, hosted execution, and transactional rollback are deferred.
 
 These are migration inputs, not reasons to expand the current CLI with more domain-specific branches.

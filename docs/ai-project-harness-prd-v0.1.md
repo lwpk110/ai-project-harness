@@ -4,7 +4,7 @@
 
 - 产品名称：AI Project Harness
 - 文档版本：v0.1
-- 文档状态：架构方向已更新，待协议实现和试点验证
+- 文档状态：M1 协议基础已实现，待 M2/M3 迁移和试点验证
 - 目标读者：产品负责人、平台工程师、AI Agent 开发者、研发团队负责人
 
 ## 2. 背景与问题
@@ -577,7 +577,7 @@ v0.1 满足以下条件时可交付：
 
 ### v0.1：插件内核与安全接入闭环
 
-完成 M0-M3：统一术语和 ADR、Manifest/catalog、Detector/Rule 只读组合、Recipe/Operation 受治理变更，以及六个官方声明式插件。v0.1 不执行第三方插件代码。
+完成 M0-M3：统一术语和 ADR、Manifest/catalog、Detector/Rule 只读组合、Recipe/Operation 受治理变更，以及六个官方声明式插件。M1 已完成：结构化 YAML、Manifest/catalog、兼容性、依赖拓扑和贡献 ID 唯一性；v0.1 不执行第三方插件代码。
 
 ### v0.2：生命周期、升级与 Hosted Plugin
 

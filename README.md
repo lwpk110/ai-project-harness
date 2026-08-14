@@ -32,4 +32,4 @@ The kernel is runtime-neutral. Agent runtimes are optional Connector + Adapter p
 
 ## Implementation status
 
-The runnable v0.1 slice establishes the CLI, manifests, state model, audit report, and safe adoption flow. Plugin behavior is still partly hard-coded in `src/cli.js`; the documented migration first introduces structural discovery and read-only detector/rule composition, then governed recipes and typed operations, and only later hosted third-party execution and runtime adapters.
+The runnable v0.1 slice establishes the CLI, manifests, state model, audit report, and safe adoption flow. M1 now parses configuration and manifests structurally, discovers bundled plugins from their manifests, and validates compatibility, dependencies, and duplicate contributions. Detection, audit rules, planning recipes, typed operations, and permission execution remain the next migration stages.

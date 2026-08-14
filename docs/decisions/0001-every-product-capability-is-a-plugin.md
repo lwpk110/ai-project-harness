@@ -112,4 +112,4 @@ Rejected because it would couple project governance to one agent runtime and vio
 
 ## Migration Rule
 
-No new project-specific conditional should be added to the CLI when a documented contribution point can own it. During migration, a temporary kernel implementation may remain only when the target extension contract and removal milestone are recorded in the plugin architecture roadmap.
+No new project-specific conditional should be added to the CLI when a documented contribution point can own it. During migration, a temporary kernel implementation may remain only when the target extension contract and removal milestone are recorded in the plugin architecture roadmap. Bundled plugins are discovered from packaged manifests rather than a hand-maintained name list, and their structure is validated before the kernel uses them.
