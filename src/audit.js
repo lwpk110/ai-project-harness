@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { parseDocument } from 'yaml';
 
 const excludedDirectories = new Set(['.git', '.harness', 'node_modules', 'plugins']);
@@ -12,8 +13,7 @@ function freezeArray(items) {
 function freezeValue(value) {
   if (Array.isArray(value)) return Object.freeze(value.map(freezeValue));
   if (value !== null && typeof value === 'object') {
-    for (const item of Object.values(value)) freezeValue(item);
-    return Object.freeze(value);
+    return Object.freeze(Object.fromEntries(Object.entries(value).map(([key, item]) => [key, freezeValue(item)])));
   }
   return value;
 }
@@ -118,7 +118,10 @@ function validateSelector(value, label, errors) {
 function validateContribution(source, expectedKind, expectedId, label) {
   const document = parseYaml(source, label);
   const errors = [];
-  onlyKeys(document, new Set(['apiVersion', 'kind', 'metadata', 'facts', 'when', 'finding']), label, errors);
+  const allowedKeys = expectedKind === 'Detector'
+    ? new Set(['apiVersion', 'kind', 'metadata', 'facts'])
+    : new Set(['apiVersion', 'kind', 'metadata', 'when', 'finding']);
+  onlyKeys(document, allowedKeys, label, errors);
   if (document.apiVersion !== 'harness.dev/v1') errors.push('apiVersion must be harness.dev/v1');
   if (!contributionKinds.has(document.kind) || document.kind !== expectedKind) errors.push(`kind must be ${expectedKind}`);
   if (!isRecord(document.metadata)) errors.push('metadata must be a mapping');
@@ -198,7 +201,7 @@ export function runAudit({ root, resolved }) {
   for (const rule of rules) {
     const fact = factMap.get(rule.document.when.fact);
     if (!fact) throw new Error(`Rule ${rule.plugin}/${rule.id} references unknown fact ${rule.document.when.fact}`);
-    if (JSON.stringify(fact.value) !== JSON.stringify(rule.document.when.equals)) continue;
+    if (!isDeepStrictEqual(fact.value, rule.document.when.equals)) continue;
     const finding = rule.document.finding;
     if (findingIds.has(finding.id)) throw new Error(`Finding ${finding.id} is provided more than once`);
     findingIds.add(finding.id);

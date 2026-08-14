@@ -25,9 +25,11 @@ facts:
       default: unknown
   - id: project.ci
     select:
-      type: any-path
-      paths:
-        - .github/workflows
+      type: first-existing
+      candidates:
+        - path: .github/workflows
+          value: github-actions
+      default: unknown
   - id: project.agent-instructions
     select:
       type: all-existing

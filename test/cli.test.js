@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { discoverBundledPlugins } from '../src/catalog.js';
-import { createProjectView } from '../src/audit.js';
+import { createProjectView, runAudit, validateAuditContributions } from '../src/audit.js';
 import { parsePluginManifest, parseProjectConfig, stringifyProjectConfig } from '../src/manifest.js';
 
 const cli = path.resolve('src/cli.js');
@@ -162,11 +162,14 @@ test('diff reports modified seeded files', () => {
 test('audit is a read-only, provenance-backed composition of plugin facts and rules', () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-'));
   fs.writeFileSync(path.join(cwd, 'package.json'), '{}\n');
+  fs.mkdirSync(path.join(cwd, '.github', 'workflows'), { recursive: true });
   run(cwd, 'init');
   const report = JSON.parse(run(cwd, 'audit', '--format', 'json'));
   const stack = report.facts.find(fact => fact.id === 'project.stack');
+  const ci = report.facts.find(fact => fact.id === 'project.ci');
   const testing = report.findings.find(finding => finding.id === 'testing.missing');
   assert.deepEqual(stack.value, 'node');
+  assert.deepEqual(ci.value, 'github-actions');
   assert.deepEqual(stack.provider, { plugin: 'project-baseline', contribution: 'project-baseline' });
   assert.deepEqual(testing.provider, { plugin: 'project-baseline', contribution: 'testing-missing' });
   assert.deepEqual(testing.facts, ['project.has-tests']);
@@ -194,4 +197,28 @@ test('ProjectView is an immutable snapshot that excludes harness internals', () 
   assert.equal(Object.isFrozen(view), true);
   assert.equal(Object.isFrozen(view.entries), true);
   assert.deepEqual(view.entries, [{ path: 'README.md', type: 'file' }]);
+});
+
+test('audit values are deeply immutable and rules use structural equality', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-audit-'));
+  fs.writeFileSync(path.join(cwd, 'signal'), 'present\n');
+  const plugin = path.join(cwd, 'plugin');
+  fs.mkdirSync(path.join(plugin, 'contributions', 'detectors'), { recursive: true });
+  fs.mkdirSync(path.join(plugin, 'contributions', 'rules'), { recursive: true });
+  fs.writeFileSync(path.join(plugin, 'contributions', 'detectors', 'nested.yaml'), 'apiVersion: harness.dev/v1\nkind: Detector\nmetadata:\n  id: nested\nfacts:\n  - id: example.nested\n    select:\n      type: first-existing\n      candidates:\n        - path: signal\n          value:\n            first: 1\n            values: [a, b]\n      default: {}\n');
+  fs.writeFileSync(path.join(plugin, 'contributions', 'rules', 'matches.yaml'), 'apiVersion: harness.dev/v1\nkind: Rule\nmetadata:\n  id: matches\nwhen:\n  fact: example.nested\n  equals:\n    values: [a, b]\n    first: 1\nfinding:\n  id: example.matches\n  priority: P3\n  title: Nested value matched\n  action: No action required\n');
+  const loaded = { directory: plugin, manifest: { contributes: { detectors: ['nested'], rules: ['matches'] } } };
+  const resolved = { ordered: ['example'], active: new Map([['example', loaded]]) };
+  const report = runAudit({ root: cwd, resolved });
+  assert.equal(report.findings[0].id, 'example.matches');
+  assert.equal(Object.isFrozen(report.facts[0].value), true);
+  assert.equal(Object.isFrozen(report.facts[0].value.values), true);
+});
+
+test('audit contribution validation rejects fields from the other contract kind', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-plugin-'));
+  fs.mkdirSync(path.join(directory, 'contributions', 'detectors'), { recursive: true });
+  fs.writeFileSync(path.join(directory, 'contributions', 'detectors', 'invalid.yaml'), 'apiVersion: harness.dev/v1\nkind: Detector\nmetadata:\n  id: invalid\nfacts:\n  - id: example.fact\n    select:\n      type: any-path\n      paths: [README.md]\nfinding:\n  id: example.invalid\n');
+  const loaded = { directory, manifest: { contributes: { detectors: ['invalid'] } } };
+  assert.throws(() => validateAuditContributions({ ordered: ['example'], active: new Map([['example', loaded]]) }), /finding is not supported/);
 });

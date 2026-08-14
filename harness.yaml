@@ -1,7 +1,7 @@
 schema: 1
 project:
   mode: new
-  detected: []
+  detected: {}
 integration:
   policy: preserve-existing
   auto_fix_max_priority: P2
