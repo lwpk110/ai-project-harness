@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { parseDocument } from 'yaml';
 
@@ -28,7 +29,11 @@ function collectEntries(root, relative = '') {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     if (entry.isDirectory() && excludedDirectories.has(entry.name)) continue;
     const child = path.join(relative, entry.name);
-    entries.push({ path: normalizeProjectPath(child), type: entry.isDirectory() ? 'directory' : 'file' });
+    const type = entry.isDirectory() ? 'directory' : entry.isFile() ? 'file' : entry.isSymbolicLink() ? 'symlink' : 'other';
+    const record = { path: normalizeProjectPath(child), type };
+    if (type === 'file') record.hash = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(root, child))).digest('hex')}`;
+    else if (type === 'symlink') record.hash = `sha256:${crypto.createHash('sha256').update(fs.readlinkSync(path.join(root, child))).digest('hex')}`;
+    entries.push(record);
     if (entry.isDirectory()) entries.push(...collectEntries(root, child));
   }
   return entries;
@@ -43,29 +48,34 @@ function existingPaths(view) {
   return new Set(view.entries.map(entry => entry.path));
 }
 
+function evidenceFor(view, projectPath) {
+  const entry = view.entries.find(item => item.path === projectPath);
+  return entry?.hash ? { path: projectPath, hash: entry.hash } : { path: projectPath };
+}
+
 function selectFact(view, selector, label) {
   if (selector.type === 'first-existing') {
     const existing = existingPaths(view);
     for (const candidate of selector.candidates) {
-      if (existing.has(candidate.path)) return { value: candidate.value, evidence: [{ path: candidate.path }] };
+      if (existing.has(candidate.path)) return { value: candidate.value, evidence: [evidenceFor(view, candidate.path)] };
     }
     return { value: selector.default, evidence: [] };
   }
   if (selector.type === 'all-existing') {
     const existing = existingPaths(view);
     const matches = selector.paths.filter(item => existing.has(item));
-    return { value: matches, evidence: matches.map(path => ({ path })) };
+    return { value: matches, evidence: matches.map(path => evidenceFor(view, path)) };
   }
   if (selector.type === 'any-path') {
     const existing = existingPaths(view);
     const matches = selector.paths.filter(item => existing.has(item));
-    return { value: matches.length > 0, evidence: matches.map(path => ({ path })) };
+    return { value: matches.length > 0, evidence: matches.map(path => evidenceFor(view, path)) };
   }
   if (selector.type === 'path-contains') {
     const matches = view.entries
       .filter(entry => selector.types.includes(entry.type) && selector.terms.some(term => entry.path.toLowerCase().includes(term.toLowerCase())))
       .map(entry => entry.path);
-    return { value: matches.length > 0, evidence: matches.map(path => ({ path })) };
+    return { value: matches.length > 0, evidence: matches.map(path => evidenceFor(view, path)) };
   }
   throw new Error(`${label}: unsupported selector type ${selector.type}`);
 }

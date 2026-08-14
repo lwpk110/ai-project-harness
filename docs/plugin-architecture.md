@@ -1,6 +1,6 @@
 # Plugin Architecture
 
-This document defines the target plugin system accepted in [ADR 0001](decisions/0001-every-product-capability-is-a-plugin.md). It describes a target architecture, not the complete behavior of the current v0.1 implementation.
+This document defines the target plugin system accepted in [ADR 0001](decisions/0001-every-product-capability-is-a-plugin.md). It also records the implemented v0.1 migration boundary so contributors can distinguish available contracts from planned hosted/runtime capabilities.
 
 ## Product Boundary
 
@@ -295,12 +295,13 @@ Exit criterion: adding a declarative built-in plugin requires no `src/cli.js` ed
 
 Exit criterion: adding an audit rule requires only a plugin contribution and contract tests.
 
-### M3: Governed change planning
+### M3: Governed change planning (implemented)
 
 - Introduce Recipe and typed-operation schemas.
 - Move finding-to-change mapping out of `plan()`.
 - Add conflict detection, stale-hash rejection, permission review, and immutable plan ids.
-- Make `apply()` a transactional typed-operation executor.
+- Make `apply()` a transactional typed-operation executor for file operations.
+- Keep command and connector operations review-required until their execution broker is delivered.
 
 Exit criterion: no plugin writes project files directly during adoption.
 
@@ -326,9 +327,8 @@ The current v0.1 slice intentionally falls short of this target:
 
 - catalog discovery and validation are local-only; registry resolution, signatures, and broad SemVer support are deferred;
 - ProjectView, detector selection, fact records, and rule evaluation are kernel protocols; only the generic protocol executor lives in `src/audit.js`;
-- plan recipes and apply behavior are hard-coded;
-- permission declarations are not yet enforced;
+- command and connector operations have no execution broker yet; they are schema-validated and review-gated;
 - plugins cannot yet register providers or lifecycle effects;
-- lockfile source resolution, migrations, hosted execution, and transactional rollback are deferred.
+- lockfile source resolution, migrations, hosted execution, and runtime-level transactional rollback are deferred.
 
 These are migration inputs, not reasons to expand the current CLI with more domain-specific branches.

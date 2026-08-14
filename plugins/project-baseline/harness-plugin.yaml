@@ -13,4 +13,11 @@ contributes:
     - agent-instructions-missing
     - docs-missing
     - gitignore-missing
-permissions: {}
+  recipes:
+    - create-agent-instructions
+    - create-gitignore
+permissions:
+  filesystem:
+    write:
+      - AGENTS.md
+      - .gitignore

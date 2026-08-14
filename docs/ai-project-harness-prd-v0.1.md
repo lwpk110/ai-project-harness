@@ -4,7 +4,7 @@
 
 - 产品名称：AI Project Harness
 - 文档版本：v0.1
-- 文档状态：M1/M2 已实现，待 M3 受治理变更迁移和试点验证
+- 文档状态：M1/M2/M3 已实现，待 M3 试点验证
 - 目标读者：产品负责人、平台工程师、AI Agent 开发者、研发团队负责人
 
 ## 2. 背景与问题
@@ -175,7 +175,7 @@ harness plan --preset backend-service
 harness apply --only docs,git
 ```
 
-`audit` 不修改项目；`plan` 输出证据、建议、预计变更文件和风险；`apply` 只执行用户确认的计划，并在执行前创建恢复点。
+`audit` 不修改项目；`plan` 输出证据、建议、预计变更文件和风险，并生成包含输入摘要、权限审查和不可变 ID 的 Plan；`apply` 只执行已批准且未过期的文件类 Operation，并在执行前创建恢复点，失败时回滚。命令和连接器 Operation 在执行 broker 完成前保持 review-required。
 
 ### 7.3 启用规范
 
@@ -577,7 +577,7 @@ v0.1 满足以下条件时可交付：
 
 ### v0.1：插件内核与安全接入闭环
 
-规划完成 M0-M3：统一术语和 ADR、Manifest/catalog、Detector/Rule 只读组合、Recipe/Operation 受治理变更，以及七个官方声明式插件。当前已完成 M1：结构化 YAML、Manifest/catalog、兼容性、依赖拓扑和贡献 ID 唯一性；已完成 M2：不可变 ProjectView、声明式 Detector/Rule 组合和带 Provider 溯源的审计结果。v0.1 不执行第三方插件代码。
+规划完成 M0-M3：统一术语和 ADR、Manifest/catalog、Detector/Rule 只读组合、Recipe/Operation 受治理变更，以及七个官方声明式插件。当前已完成 M1：结构化 YAML、Manifest/catalog、兼容性、依赖拓扑和贡献 ID 唯一性；已完成 M2：不可变 ProjectView、声明式 Detector/Rule 组合和带 Provider 溯源的审计结果；已完成 M3：Recipe、不可变 Plan、Typed Operation、权限审查、stale 检测和文件类事务执行。M3 尚不执行命令或外部连接器，v0.1 也不执行第三方插件代码。
 
 ### v0.2：生命周期、升级与 Hosted Plugin
 

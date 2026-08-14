@@ -6,6 +6,8 @@ import { execFileSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { discoverBundledPlugins } from './catalog.js';
 import { runAudit, validateAuditContributions } from './audit.js';
+import { buildPlan, inputDigests, validatePlanningContributions } from './planning.js';
+import { executePlan } from './executor.js';
 import { parsePluginManifest, parseProjectConfig, stringifyProjectConfig } from './manifest.js';
 
 const root = process.cwd();
@@ -62,23 +64,30 @@ function audit(options = {}) {
   return report;
 }
 function plan() {
-  const state = loadState(); const report = audit({ silent: true });
-  const changes = report.findings.filter(f => ['P2', 'P3'].includes(f.priority)).map(f => ({ id: f.id, priority: f.priority, action: f.action, files: f.id === 'agents.instructions' ? ['AGENTS.md'] : f.id === 'gitignore.missing' ? ['.gitignore'] : [] }));
-  state.plan = { generatedAt: new Date().toISOString(), changes, manual: report.findings.filter(f => !['P2', 'P3'].includes(f.priority)).map(f => f.id) }; saveState(state);
-  console.log(JSON.stringify(state.plan, null, 2));
+  const config = parseConfig();
+  const resolved = resolveEnabledPlugins(config);
+  const report = runAudit({ root, resolved });
+  const generated = buildPlan({ root, config, resolved, report });
+  const state = loadState(); state.plan = generated; saveState(state);
+  console.log(JSON.stringify(generated, null, 2));
 }
-function selectedChanges(changes, only) { if (!only) return changes; if (only === true) throw new Error('apply --only requires a comma-separated module list'); const modules = new Set(String(only).split(',').map(item => item.trim()).filter(Boolean)); const supported = { docs: 'agents.instructions', git: 'gitignore.missing' }; for (const module of modules) if (!supported[module]) throw new Error(`Unknown apply module: ${module}`); return changes.filter(change => [...modules].some(module => supported[module] === change.id)); }
 function apply(options = {}) {
   const state = loadState(); if (!state.plan) throw new Error('No plan found. Run harness plan first.');
-  const changes = selectedChanges(state.plan.changes, options.only);
-  const recovery = path.join(harnessDir, 'recovery', new Date().toISOString().replace(/[:.]/g, '-')); ensureDir(recovery);
-  const selectedFiles = changes.flatMap(change => change.files);
-  for (const file of selectedFiles) if (exists(path.join(root, file))) write(path.join(recovery, file), readText(path.join(root, file)));
-  for (const change of changes) {
-    if (change.id === 'agents.instructions' && !exists(path.join(root, 'AGENTS.md'))) write(path.join(root, 'AGENTS.md'), '# Agent instructions\n\nRun the project verification command before delivery.\n');
-    if (change.id === 'gitignore.missing' && !exists(path.join(root, '.gitignore'))) write(path.join(root, '.gitignore'), 'node_modules/\n.env\n');
-  }
-  state.appliedAt = new Date().toISOString(); state.files = {}; for (const file of ['AGENTS.md', '.gitignore']) if (exists(path.join(root, file))) state.files[file] = { hash: sha256(readText(path.join(root, file))), ownership: 'seeded' }; saveState(state); console.log(`Applied ${changes.length} changes. Recovery: ${recovery}`);
+  const config = parseConfig();
+  const resolved = resolveEnabledPlugins(config);
+  const result = executePlan({
+    root,
+    plan: state.plan,
+    currentInputs: inputDigests({ root, config, resolved }),
+    only: options.only,
+    commit(applied) {
+      state.applied = applied;
+      state.appliedAt = applied.appliedAt;
+      state.files = { ...(state.files ?? {}), ...applied.files };
+      saveState(state);
+    }
+  });
+  console.log(`Applied ${result.results.length} operations. Recovery: ${result.recovery}`);
 }
 let _builtinPluginNames;
 function builtinPluginNames() {
@@ -175,7 +184,7 @@ function pluginCommand(action, name) { const config = parseConfig(); if (action 
 function setPluginEnabled(name, enabled) { const config = parseConfig(); if (enabled) enablePluginWithDependencies(name, config); else { requireBuiltinPlugin(name); const entry = config.plugins[name]; config.plugins[name] = entry !== null && typeof entry === 'object' ? { ...entry, enabled: false } : false; } resolveEnabledPlugins(config); saveConfig(config); console.log(`${enabled ? 'Enabled' : 'Disabled'} plugin ${name}`); }
 function removePlugin(name) { requireBuiltinPlugin(name); const config = parseConfig(); if (!Object.hasOwn(config.plugins, name)) throw new Error(`Plugin is not configured: ${name}`); delete config.plugins[name]; resolveEnabledPlugins(config); saveConfig(config); console.log(`Removed plugin ${name}`); }
 function diff() { const state = loadState(); const changes = []; for (const [file, record] of Object.entries(state.files ?? {})) { const current = path.join(root, file); const currentHash = exists(current) ? sha256(readText(current)) : null; if (currentHash !== record.hash) changes.push({ file, status: exists(current) ? 'modified' : 'deleted', ownership: record.ownership }); } console.log(JSON.stringify({ changes }, null, 2)); return changes; }
-function doctor() { const config = parseConfig(); const errors = []; try { const resolved = resolveEnabledPlugins(config); validateAuditContributions(resolved); } catch (error) { errors.push(error.message); } for (const name of Object.keys(config.plugins ?? {})) { if (!isBuiltinPlugin(name)) { errors.push(`Unknown plugin: ${name}`); continue; } try { validatePlugin(name); } catch (error) { errors.push(error.message); } } const lock = loadLock(); if (lock && lock.schema !== 1) errors.push('harness.lock schema must be 1'); if (lock) for (const [name, entry] of Object.entries(lock.plugins ?? {})) { try { if (entry.integrity !== `sha256:${sha256(pluginManifest(name))}`) errors.push(`Lock integrity mismatch: ${name}`); } catch (error) { errors.push(error.message); } } if (!config.commands?.verify) errors.push('commands.verify is required'); if (errors.length) { console.error([...new Set(errors)].join('\n')); process.exitCode = 1; } else console.log('Harness doctor: OK'); }
+function doctor() { const config = parseConfig(); const errors = []; try { const resolved = resolveEnabledPlugins(config); validateAuditContributions(resolved); validatePlanningContributions(resolved); } catch (error) { errors.push(error.message); } for (const name of Object.keys(config.plugins ?? {})) { if (!isBuiltinPlugin(name)) { errors.push(`Unknown plugin: ${name}`); continue; } try { validatePlugin(name); } catch (error) { errors.push(error.message); } } const lock = loadLock(); if (lock && lock.schema !== 1) errors.push('harness.lock schema must be 1'); if (lock) for (const [name, entry] of Object.entries(lock.plugins ?? {})) { try { if (entry.integrity !== `sha256:${sha256(pluginManifest(name))}`) errors.push(`Lock integrity mismatch: ${name}`); } catch (error) { errors.push(error.message); } } if (!config.commands?.verify) errors.push('commands.verify is required'); if (errors.length) { console.error([...new Set(errors)].join('\n')); process.exitCode = 1; } else console.log('Harness doctor: OK'); }
 function verify() { const config = parseConfig(); const command = config.commands?.verify; if (!command) throw new Error('commands.verify is required'); if (process.platform === 'win32') execSync(command, { cwd: root, stdio: 'inherit' }); else { const [bin, ...args] = splitCommand(command); execFileSync(bin, args, { cwd: root, stdio: 'inherit' }); } console.log('Harness verify: OK'); }
 function help() { console.log('harness init | adopt | audit | plan | apply | add <plugin> | remove <plugin> | enable <plugin> | disable <plugin> | plugin list|info|validate <plugin> | diff | sync | doctor | verify'); }
 

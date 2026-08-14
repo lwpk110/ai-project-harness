@@ -1,0 +1,14 @@
+apiVersion: harness.dev/v1
+kind: Recipe
+metadata:
+  id: create-gitignore
+  module: git
+when:
+  finding: gitignore.missing
+operations:
+  - type: file.create
+    path: .gitignore
+    content: |
+      node_modules/
+      .env
+    ownership: seeded

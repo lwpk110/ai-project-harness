@@ -6,6 +6,8 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { discoverBundledPlugins } from '../src/catalog.js';
 import { createProjectView, runAudit, validateAuditContributions } from '../src/audit.js';
+import { buildPlan, inputDigests, validatePlanningContributions } from '../src/planning.js';
+import { executePlan } from '../src/executor.js';
 import { parsePluginManifest, parseProjectConfig, stringifyProjectConfig } from '../src/manifest.js';
 
 const cli = path.resolve('src/cli.js');
@@ -78,10 +80,10 @@ test('apply --only limits adoption changes to selected modules', () => {
   fs.rmSync(path.join(cwd, 'AGENTS.md'));
   run(cwd, 'audit');
   run(cwd, 'plan');
-  assert.match(run(cwd, 'apply', '--only', 'git'), /Applied 1 changes/);
+  assert.throws(() => run(cwd, 'apply', '--only', 'unknown'), /Unknown apply module: unknown/);
+  assert.match(run(cwd, 'apply', '--only', 'git'), /Applied 1 operations/);
   assert.equal(fs.existsSync(path.join(cwd, '.gitignore')), true);
   assert.equal(fs.existsSync(path.join(cwd, 'AGENTS.md')), false);
-  assert.throws(() => run(cwd, 'apply', '--only', 'unknown'), /Unknown apply module: unknown/);
 });
 
 test('plugins can be enabled from an empty configuration', () => {
@@ -155,8 +157,8 @@ test('diff reports modified seeded files', () => {
   run(cwd, 'audit');
   run(cwd, 'plan');
   run(cwd, 'apply');
-  fs.appendFileSync(path.join(cwd, 'AGENTS.md'), 'Changed by the project.\n');
-  assert.deepEqual(JSON.parse(run(cwd, 'diff')), { changes: [{ file: 'AGENTS.md', status: 'modified', ownership: 'seeded' }] });
+  fs.appendFileSync(path.join(cwd, '.gitignore'), 'Changed by the project.\n');
+  assert.deepEqual(JSON.parse(run(cwd, 'diff')), { changes: [{ file: '.gitignore', status: 'modified', ownership: 'seeded' }] });
 });
 
 test('audit is a read-only, provenance-backed composition of plugin facts and rules', () => {
@@ -196,7 +198,9 @@ test('ProjectView is an immutable snapshot that excludes harness internals', () 
   const view = createProjectView(cwd);
   assert.equal(Object.isFrozen(view), true);
   assert.equal(Object.isFrozen(view.entries), true);
-  assert.deepEqual(view.entries, [{ path: 'README.md', type: 'file' }]);
+  assert.equal(view.entries[0].path, 'README.md');
+  assert.equal(view.entries[0].type, 'file');
+  assert.match(view.entries[0].hash, /^sha256:/);
 });
 
 test('audit values are deeply immutable and rules use structural equality', () => {
@@ -221,4 +225,134 @@ test('audit contribution validation rejects fields from the other contract kind'
   fs.writeFileSync(path.join(directory, 'contributions', 'detectors', 'invalid.yaml'), 'apiVersion: harness.dev/v1\nkind: Detector\nmetadata:\n  id: invalid\nfacts:\n  - id: example.fact\n    select:\n      type: any-path\n      paths: [README.md]\nfinding:\n  id: example.invalid\n');
   const loaded = { directory, manifest: { contributes: { detectors: ['invalid'] } } };
   assert.throws(() => validateAuditContributions({ ordered: ['example'], active: new Map([['example', loaded]]) }), /finding is not supported/);
+});
+
+test('planning is deterministic and emits immutable provenance-backed operations', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-plan-'));
+  run(cwd, 'init');
+  fs.rmSync(path.join(cwd, 'AGENTS.md'));
+  const first = JSON.parse(run(cwd, 'plan'));
+  const second = JSON.parse(run(cwd, 'plan'));
+  assert.deepEqual(second, first);
+  assert.match(first.id, /^sha256:/);
+  assert.equal(first.status, 'approved');
+  assert.deepEqual(first.operations.map(operation => [operation.type, operation.path, operation.module]), [
+    ['file.create', 'AGENTS.md', 'docs'],
+    ['file.create', '.gitignore', 'git']
+  ]);
+  assert.deepEqual(first.operations[0].provider, { plugin: 'project-baseline', contribution: 'create-agent-instructions' });
+  assert.deepEqual(first.reviews.map(review => review.status), ['approved', 'approved']);
+});
+
+test('apply rejects stale or tampered immutable plans before changing files', () => {
+  const staleRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-stale-'));
+  run(staleRoot, 'init');
+  run(staleRoot, 'plan');
+  fs.writeFileSync(path.join(staleRoot, 'unexpected.txt'), 'changed after planning\n');
+  assert.throws(() => run(staleRoot, 'apply'), /Plan inputs are stale/);
+  assert.equal(fs.existsSync(path.join(staleRoot, '.gitignore')), false);
+
+  const tamperedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-tampered-'));
+  run(tamperedRoot, 'init');
+  run(tamperedRoot, 'plan');
+  const statePath = path.join(tamperedRoot, '.harness', 'state.json');
+  const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  state.plan.operations[0].content = 'tampered\n';
+  fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+  assert.throws(() => run(tamperedRoot, 'apply'), /Plan integrity check failed/);
+  assert.equal(fs.existsSync(path.join(tamperedRoot, '.gitignore')), false);
+
+  const pluginRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-plugin-drift-'));
+  run(pluginRoot, 'init');
+  fs.cpSync(path.resolve('plugins', 'project-baseline'), path.join(pluginRoot, 'plugins', 'project-baseline'), { recursive: true });
+  run(pluginRoot, 'plan');
+  fs.appendFileSync(path.join(pluginRoot, 'plugins', 'project-baseline', 'contributions', 'recipes', 'create-gitignore.yaml'), '\n');
+  assert.throws(() => run(pluginRoot, 'apply'), /Plan inputs are stale/);
+});
+
+test('recipe validation covers the closed operation vocabulary and rejects unknown types', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-recipes-'));
+  fs.mkdirSync(path.join(directory, 'contributions', 'recipes'), { recursive: true });
+  const file = path.join(directory, 'contributions', 'recipes', 'all.yaml');
+  const header = 'apiVersion: harness.dev/v1\nkind: Recipe\nmetadata:\n  id: all\n  module: test\nwhen:\n  finding: example.trigger\noperations:\n';
+  fs.writeFileSync(file, `${header}  - { type: file.create, path: new.txt, content: new, ownership: seeded }\n  - { type: file.replace, path: old.txt, content: old, ownership: managed }\n  - type: structured.merge\n    path: config.yaml\n    format: yaml\n    fragment: { enabled: true }\n    conflictPolicy: preserve\n    ownership: structured-merge\n  - { type: directory.ensure, path: generated }\n  - { type: command.run, grant: verify, args: [] }\n  - { type: connector.configure, connector: github, settings: {}, secretRefs: [GITHUB_TOKEN] }\n`);
+  const loaded = { directory, manifest: { metadata: { version: '0.1.0' }, contributes: { recipes: ['all'], connectors: ['github'] }, permissions: { filesystem: { write: ['new.txt', 'old.txt', 'config.yaml', 'generated'] }, commands: ['verify'], secrets: ['GITHUB_TOKEN'] } } };
+  const resolved = { ordered: ['example'], active: new Map([['example', loaded]]) };
+  assert.doesNotThrow(() => validatePlanningContributions(resolved));
+  fs.writeFileSync(file, `${header}  - { type: shell.exec }\n`);
+  assert.throws(() => validatePlanningContributions(resolved), /type is not supported/);
+  fs.writeFileSync(file, `${header}  - { type: file.create, path: .harness/owned.txt, content: invalid, ownership: managed }\n`);
+  assert.throws(() => validatePlanningContributions(resolved), /targets reserved harness state/);
+});
+
+test('transactional apply rolls back files and implicit directories on failure', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-transaction-'));
+  fs.writeFileSync(path.join(cwd, 'broken.yaml'), 'value: [\n');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-plugin-'));
+  fs.mkdirSync(path.join(directory, 'contributions', 'recipes'), { recursive: true });
+  fs.writeFileSync(path.join(directory, 'contributions', 'recipes', 'transaction.yaml'), 'apiVersion: harness.dev/v1\nkind: Recipe\nmetadata:\n  id: transaction\n  module: test\nwhen:\n  finding: example.trigger\noperations:\n  - type: file.create\n    path: nested/created.txt\n    content: created\n    ownership: seeded\n  - type: structured.merge\n    path: broken.yaml\n    format: yaml\n    fragment: { enabled: true }\n    conflictPolicy: replace\n    ownership: structured-merge\n');
+  const manifest = { metadata: { version: '0.1.0' }, contributes: { recipes: ['transaction'] }, permissions: { filesystem: { write: ['nested/**', 'broken.yaml'] } } };
+  const loaded = { directory, content: 'transaction-plugin', manifest };
+  const resolved = { ordered: ['example'], active: new Map([['example', loaded]]) };
+  const config = { integration: { auto_fix_max_priority: 'P2' } };
+  const report = { findings: [{ id: 'example.trigger', priority: 'P2' }] };
+  const plan = buildPlan({ root: cwd, config, resolved, report });
+  assert.throws(() => executePlan({ root: cwd, plan, currentInputs: inputDigests({ root: cwd, config, resolved }) }), /Apply failed and rolled back/);
+  assert.equal(fs.existsSync(path.join(cwd, 'nested')), false);
+  assert.equal(fs.readFileSync(path.join(cwd, 'broken.yaml'), 'utf8'), 'value: [\n');
+});
+
+test('commands remain review-gated without an execution broker', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-command-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-plugin-'));
+  fs.mkdirSync(path.join(directory, 'contributions', 'recipes'), { recursive: true });
+  fs.writeFileSync(path.join(directory, 'contributions', 'recipes', 'command.yaml'), 'apiVersion: harness.dev/v1\nkind: Recipe\nmetadata:\n  id: command\n  module: test\nwhen:\n  finding: example.trigger\noperations:\n  - type: command.run\n    grant: verify\n    args: []\n');
+  const manifest = { metadata: { version: '0.1.0' }, contributes: { recipes: ['command'] }, permissions: { commands: ['verify'] } };
+  const loaded = { directory, content: 'command-plugin', manifest };
+  const resolved = { ordered: ['example'], active: new Map([['example', loaded]]) };
+  const config = { integration: { auto_fix_max_priority: 'P2' } };
+  const plan = buildPlan({ root: cwd, config, resolved, report: { findings: [{ id: 'example.trigger', priority: 'P2' }] } });
+  assert.equal(plan.status, 'review-required');
+  assert.throws(() => executePlan({ root: cwd, plan, currentInputs: inputDigests({ root: cwd, config, resolved }) }), /unapproved operation/);
+});
+
+test('file operations execute through the kernel and record ownership', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-files-'));
+  fs.writeFileSync(path.join(cwd, 'managed.txt'), 'before\n');
+  fs.writeFileSync(path.join(cwd, 'config.json'), '{"existing":true}\n');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-plugin-'));
+  fs.mkdirSync(path.join(directory, 'contributions', 'recipes'), { recursive: true });
+  fs.writeFileSync(path.join(directory, 'contributions', 'recipes', 'files.yaml'), 'apiVersion: harness.dev/v1\nkind: Recipe\nmetadata:\n  id: files\n  module: files\nwhen:\n  finding: example.trigger\noperations:\n  - { type: directory.ensure, path: generated }\n  - { type: file.create, path: generated/new.txt, content: "new\\n", ownership: seeded }\n  - { type: file.replace, path: managed.txt, content: "after\\n", ownership: managed }\n  - type: structured.merge\n    path: config.json\n    format: json\n    fragment: { added: true }\n    conflictPolicy: error\n    ownership: structured-merge\n');
+  const manifest = { metadata: { version: '0.1.0' }, contributes: { recipes: ['files'] }, permissions: { filesystem: { write: ['generated', 'generated/**', 'managed.txt', 'config.json'] } } };
+  const loaded = { directory, content: 'files-plugin', manifest };
+  const resolved = { ordered: ['example'], active: new Map([['example', loaded]]) };
+  const config = { integration: { auto_fix_max_priority: 'P2' } };
+  const plan = buildPlan({ root: cwd, config, resolved, report: { findings: [{ id: 'example.trigger', priority: 'P2' }] } });
+  assert.throws(() => executePlan({ root: cwd, plan, currentInputs: inputDigests({ root: cwd, config, resolved }), commit() { throw new Error('state write failed'); } }), /Apply failed and rolled back: state write failed/);
+  assert.equal(fs.existsSync(path.join(cwd, 'generated')), false);
+  assert.equal(fs.readFileSync(path.join(cwd, 'managed.txt'), 'utf8'), 'before\n');
+  const result = executePlan({ root: cwd, plan, currentInputs: inputDigests({ root: cwd, config, resolved }) });
+  assert.equal(fs.readFileSync(path.join(cwd, 'managed.txt'), 'utf8'), 'after\n');
+  assert.equal(fs.readFileSync(path.join(cwd, 'generated', 'new.txt'), 'utf8'), 'new\n');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(cwd, 'config.json'), 'utf8')), { existing: true, added: true });
+  assert.equal(result.files['managed.txt'].ownership, 'managed');
+  assert.equal(result.files['config.json'].ownership, 'structured-merge');
+});
+
+test('planning rejects conflicting targets and undeclared write permissions', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-conflict-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-plugin-'));
+  fs.mkdirSync(path.join(directory, 'contributions', 'recipes'), { recursive: true });
+  const recipe = id => `apiVersion: harness.dev/v1\nkind: Recipe\nmetadata:\n  id: ${id}\n  module: test\nwhen:\n  finding: example.trigger\noperations:\n  - { type: file.create, path: shared.txt, content: ${id}, ownership: seeded }\n`;
+  fs.writeFileSync(path.join(directory, 'contributions', 'recipes', 'first.yaml'), recipe('first'));
+  fs.writeFileSync(path.join(directory, 'contributions', 'recipes', 'second.yaml'), recipe('second'));
+  const config = { integration: { auto_fix_max_priority: 'P2' } };
+  const report = { findings: [{ id: 'example.trigger', priority: 'P2' }] };
+  const loaded = { directory, content: 'conflict-plugin', manifest: { metadata: { version: '0.1.0' }, contributes: { recipes: ['first', 'second'] }, permissions: { filesystem: { write: ['shared.txt'] } } } };
+  const resolved = { ordered: ['example'], active: new Map([['example', loaded]]) };
+  assert.throws(() => buildPlan({ root: cwd, config, resolved, report }), /Operation conflict on shared.txt/);
+  loaded.manifest.contributes.recipes = ['first'];
+  loaded.manifest.permissions.filesystem.write = [];
+  assert.throws(() => buildPlan({ root: cwd, config, resolved, report }), /may not write undeclared path shared.txt/);
+  assert.throws(() => validatePlanningContributions(resolved), /may not write undeclared path shared.txt/);
 });
