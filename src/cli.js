@@ -119,15 +119,18 @@ function plan() {
   state.plan = { generatedAt: new Date().toISOString(), changes, manual: report.findings.filter(f => !['P2', 'P3'].includes(f.priority)).map(f => f.id) }; saveState(state);
   console.log(JSON.stringify(state.plan, null, 2));
 }
-function apply() {
+function selectedChanges(changes, only) { if (!only) return changes; if (only === true) throw new Error('apply --only requires a comma-separated module list'); const modules = new Set(String(only).split(',').map(item => item.trim()).filter(Boolean)); const supported = { docs: 'agents.instructions', git: 'gitignore.missing' }; for (const module of modules) if (!supported[module]) throw new Error(`Unknown apply module: ${module}`); return changes.filter(change => [...modules].some(module => supported[module] === change.id)); }
+function apply(options = {}) {
   const state = loadState(); if (!state.plan) throw new Error('No plan found. Run harness plan first.');
+  const changes = selectedChanges(state.plan.changes, options.only);
   const recovery = path.join(harnessDir, 'recovery', new Date().toISOString().replace(/[:.]/g, '-')); ensureDir(recovery);
-  for (const file of ['AGENTS.md', '.gitignore']) if (exists(path.join(root, file))) write(path.join(recovery, file), readText(path.join(root, file)));
-  for (const change of state.plan.changes) {
+  const selectedFiles = changes.flatMap(change => change.files);
+  for (const file of selectedFiles) if (exists(path.join(root, file))) write(path.join(recovery, file), readText(path.join(root, file)));
+  for (const change of changes) {
     if (change.id === 'agents.instructions' && !exists(path.join(root, 'AGENTS.md'))) write(path.join(root, 'AGENTS.md'), '# Agent instructions\n\nRun the project verification command before delivery.\n');
     if (change.id === 'gitignore.missing' && !exists(path.join(root, '.gitignore'))) write(path.join(root, '.gitignore'), 'node_modules/\n.env\n');
   }
-  state.appliedAt = new Date().toISOString(); state.files = {}; for (const file of ['AGENTS.md', '.gitignore']) if (exists(path.join(root, file))) state.files[file] = { hash: sha256(readText(path.join(root, file))), ownership: 'seeded' }; saveState(state); console.log(`Applied ${state.plan.changes.length} changes. Recovery: ${recovery}`);
+  state.appliedAt = new Date().toISOString(); state.files = {}; for (const file of ['AGENTS.md', '.gitignore']) if (exists(path.join(root, file))) state.files[file] = { hash: sha256(readText(path.join(root, file))), ownership: 'seeded' }; saveState(state); console.log(`Applied ${changes.length} changes. Recovery: ${recovery}`);
 }
 function addPlugin(name) { if (!builtins.includes(name)) throw new Error(`Unknown built-in plugin: ${name}`); const config = parseConfig(); config.plugins[name] = { enabled: true }; saveConfig(config); console.log(`Enabled plugin ${name}`); }
 function pluginManifestFile(name) { const projectFile = path.join(root, 'plugins', name, 'harness-plugin.yaml'); const builtinFile = path.join(moduleDir, '..', 'plugins', name, 'harness-plugin.yaml'); const file = exists(projectFile) ? projectFile : builtinFile; if (!exists(file)) throw new Error(`Plugin manifest not found: ${name}`); return { file, source: file === projectFile ? 'project' : 'builtin' }; }
@@ -148,7 +151,7 @@ try {
   if (command === 'init' || command === 'adopt') init();
   else if (command === 'audit') audit(options);
   else if (command === 'plan') plan();
-  else if (command === 'apply') apply();
+  else if (command === 'apply') apply(options);
   else if (command === 'add') addPlugin(positional[0]);
   else if (command === 'remove') removePlugin(positional[0]);
   else if (command === 'enable') setPluginEnabled(positional[0], true);
