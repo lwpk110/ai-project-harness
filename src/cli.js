@@ -66,15 +66,19 @@ function writeIfMissing(file, content) { if (exists(file)) return false; write(f
 function scaffoldFiles({ agents, preset }) {
   const runtimeText = agents.length ? agents.join(', ') : 'runtime-neutral';
   const name = projectName();
-  return new Map([
-    ['README.md', `# ${name}\n\nThis project is initialized as a governed AI agent project with the AI Project Harness.\n\n## Development loop\n\n1. Read the project context and selected skills.\n2. Run \`npm test\` before delivery.\n3. Use \`harness audit\`, \`harness plan\`, and \`harness apply\` for governed changes.\n4. Run \`npm run verify\` before handing work back.\n\nPreset: \`${preset}\`\nSelected runtimes: ${runtimeText}\n`],
+  const files = new Map([
+    ['README.md', `# ${name}\n\nThis project is initialized as a governed AI agent project with the AI Project Harness.\n\n## Harness CLI\n\nInstall the CLI from the published package (or use the source checkout during development):\n\n\`npx ai-project-harness@0.1.0 doctor\`\n\nReplace \`npx ai-project-harness@0.1.0\` with your pinned Harness command in the workflow below.\n\n## Development loop\n\n1. Read the project context and selected skills.\n2. Run \`npm test\` before delivery.\n3. Run \`npx ai-project-harness@0.1.0 audit\`, \`plan\`, and \`apply\` for governed changes.\n4. Run \`npm run verify\` before handing work back.\n\nPreset: \`${preset}\`\nSelected runtimes: ${runtimeText}\n`],
     ['AGENTS.md', `# Agent instructions\n\nThis repository is governed by AI Project Harness.\n\n## Required loop\n\n- Inspect the repository before editing.\n- Keep changes within the approved Plan when one exists.\n- Run \`npm test\` and \`npm run verify\` before delivery.\n- Do not add credentials, recovery snapshots, or machine-local state.\n\n## Agent project\n\n- Preset: \`${preset}\`\n- Runtime adapters: ${runtimeText}\n- Governed flow: audit -> plan -> apply -> verify\n`],
     ['.gitignore', 'node_modules/\n.env\n.harness/state.json\n.harness/cache/\n.harness/recovery/\n*.log\n'],
     ['agent/README.md', `# Agent Project Surface\n\nThis directory contains runtime-neutral material shared by AI coding agents.\n\n- \`workflows/\`: repeatable project workflows.\n- \`skills/\`: focused task instructions and output contracts.\n- \`connectors/\`: declared external capabilities; credentials are never stored here.\n`],
-    ['agent/workflows/governed-change.md', '# Governed Change\n\n1. Inspect the project and read relevant skills.\n2. Run `harness audit --format markdown`.\n3. Generate and review a Plan with `harness plan`.\n4. Apply only approved operations with `harness apply`.\n5. Run `npm run verify` and report evidence.\n'],
+    ['agent/workflows/governed-change.md', '# Governed Change\n\n1. Inspect the project and read relevant skills.\n2. Run `npx ai-project-harness@0.1.0 audit --format markdown`.\n3. Generate and review a Plan with `npx ai-project-harness@0.1.0 plan`.\n4. Apply only approved operations with `npx ai-project-harness@0.1.0 apply`.\n5. Run `npm run verify` and report evidence.\n'],
     ['agent/skills/project-verification/SKILL.md', '# Project Verification\n\n## Purpose\n\nProduce repeatable evidence that the project is healthy before delivery.\n\n## Contract\n\n- Run `npm test`.\n- Run `npm run verify`.\n- Report commands, exit status, and relevant failures.\n- Do not modify source files while verifying.\n'],
-    ['agent/connectors/README.md', '# Connectors\n\nExternal capabilities must be declared as Harness plugins and approved by policy.\nDo not place API keys, tokens, or session files in this directory.\n']
+    ['agent/connectors/README.md', '# Connectors\n\nExternal capabilities must be declared as Harness plugins and approved by policy.\nDo not place API keys, tokens, or session files in this directory.\n'],
+    ['test/harness-scaffold.test.js', `import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport fs from 'node:fs';\n\ntest('generated project includes its governance surface', () => {\n  assert.equal(fs.existsSync('harness.yaml'), true);\n  assert.equal(fs.existsSync('AGENTS.md'), true);\n  assert.equal(fs.existsSync('agent/workflows/governed-change.md'), true);\n});\n`]
   ]);
+  if (preset === 'startup-web') files.set('agent/skills/web-verification/SKILL.md', '# Web Verification\n\nRecord browser/API checks and attach reproducible evidence before delivery.\n');
+  if (preset === 'backend-service') files.set('agent/skills/service-verification/SKILL.md', '# Service Verification\n\nRecord contract, health, and integration checks before delivery.\n');
+  return files;
 }
 
 function nodePackage() {
@@ -85,11 +89,13 @@ function nodePackage() {
   };
 }
 
-function githubWorkflow() {
-  return `name: Verify\n\non:\n  push:\n    branches: [main, master]\n  pull_request:\n\npermissions:\n  contents: read\n\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20.x\n          cache: npm\n      - run: npm ci\n      - run: npm run verify\n`;
+function githubWorkflow({ installCommand = 'npm ci' } = {}) {
+  return `name: Verify\n\non:\n  push:\n    branches: [main, master]\n  pull_request:\n\npermissions:\n  contents: read\n\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20.x\n          cache: npm\n      - run: ${installCommand}\n      - run: npm run verify\n`;
 }
 
 function init(options = {}) {
+  const allowedOptions = new Set(['preset', 'agents', 'ci', 'adopt']);
+  for (const option of Object.keys(options)) if (!allowedOptions.has(option)) throw new Error(`Unknown init option: --${option}`);
   const adopt = options.adopt === true;
   const preset = String(options.preset ?? 'minimal');
   const scaffold = !adopt && options.preset !== undefined && preset !== 'minimal';
@@ -101,7 +107,7 @@ function init(options = {}) {
     const template = readText(path.join(moduleDir, '..', 'harness.yaml'));
     if (scaffold) {
       const config = parseProjectConfig(template);
-      config.project = { ...config.project, mode: 'new', preset, agents };
+      config.project = { ...config.project, mode: 'new', preset, agents, ci };
       write(configPath, stringifyProjectConfig(config));
     } else {
       write(configPath, template);
@@ -120,7 +126,10 @@ function init(options = {}) {
     created.push(writeIfMissing(path.join(root, 'package.json'), packageFiles.package));
     created.push(writeIfMissing(path.join(root, 'package-lock.json'), packageFiles.lock));
   }
-  if (scaffold && ci === 'github') created.push(writeIfMissing(path.join(root, '.github', 'workflows', 'verify.yml'), githubWorkflow()));
+  if (scaffold && ci === 'github') {
+    const installCommand = exists(path.join(root, 'package-lock.json')) || exists(path.join(root, 'npm-shrinkwrap.json')) ? 'npm ci' : 'npm install';
+    created.push(writeIfMissing(path.join(root, '.github', 'workflows', 'verify.yml'), githubWorkflow({ installCommand })));
+  }
   console.log(`Initialized AI Project Harness in ${root} (${preset}; ${created.filter(Boolean).length} files created)`);
 }
 function audit(options = {}) {
@@ -209,7 +218,15 @@ function validatePlugin(name) {
   if (compatibility && !satisfiesVersionRange(harnessVersion, compatibility)) throw new Error(`Plugin ${name} requires harness ${compatibility}, current version is ${harnessVersion}`);
   return { name: manifest.metadata.name, version: manifest.metadata.version, apiVersion: manifest.apiVersion, kind: manifest.kind };
 }
-function pluginDependencies(loaded) { return Object.keys(loaded.manifest.dependencies?.plugins ?? {}).sort(); }
+function pluginDependencies(loaded) { return Object.entries(loaded.manifest.dependencies?.plugins ?? {}).sort(([left], [right]) => left.localeCompare(right)); }
+function validatePluginDependencies(loaded) {
+  for (const [dependency, range] of pluginDependencies(loaded)) {
+    const dependencyManifest = loadPluginManifest(dependency).manifest;
+    if (range && !satisfiesVersionRange(dependencyManifest.metadata.version, range)) {
+      throw new Error(`Plugin ${loaded.manifest.metadata.name} requires dependency ${dependency} ${range}, found ${dependencyManifest.metadata.version}`);
+    }
+  }
+}
 function resolveEnabledPlugins(config) {
   const enabled = new Set(Object.entries(config.plugins ?? {}).filter(([, entry]) => pluginEnabled(entry)).map(([name]) => name));
   const active = new Map();
@@ -223,7 +240,8 @@ function resolveEnabledPlugins(config) {
     visiting.add(name);
     const loaded = loadPluginManifest(name);
     validatePlugin(name);
-    for (const dependency of pluginDependencies(loaded)) visit(dependency);
+    validatePluginDependencies(loaded);
+    for (const [dependency] of pluginDependencies(loaded)) visit(dependency);
     visiting.delete(name);
     active.set(name, loaded);
     ordered.push(name);
@@ -247,7 +265,8 @@ function enablePluginWithDependencies(name, config, visiting = new Set()) {
   visiting.add(name);
   const loaded = loadPluginManifest(name);
   validatePlugin(name);
-  for (const dependency of pluginDependencies(loaded)) enablePluginWithDependencies(dependency, config, visiting);
+  validatePluginDependencies(loaded);
+  for (const [dependency] of pluginDependencies(loaded)) enablePluginWithDependencies(dependency, config, visiting);
   visiting.delete(name);
   const entry = config.plugins[name];
   config.plugins[name] = entry !== null && typeof entry === 'object' ? { ...entry, enabled: true } : true;

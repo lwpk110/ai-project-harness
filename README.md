@@ -6,6 +6,17 @@ Its direction is a governed microkernel: the kernel owns permissions, plans, tra
 
 ## Quick start
 
+To create a new project with the published CLI:
+
+```bash
+mkdir my-agent-project
+cd my-agent-project
+npx ai-project-harness@0.1.0 init --preset agent-project --agents codex,claude --ci github
+npx ai-project-harness@0.1.0 doctor
+```
+
+To develop this Harness repository itself:
+
 ```bash
 npm install
 node src/cli.js init --preset agent-project --agents codex,claude --ci github

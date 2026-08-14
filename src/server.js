@@ -62,6 +62,8 @@ function projectSummary(root) {
   return {
     name: path.basename(path.resolve(root)),
     mode: config.project?.mode ?? 'unknown',
+    preset: config.project?.preset ?? 'minimal',
+    agents: Array.isArray(config.project?.agents) ? [...config.project.agents] : [],
     policy: config.integration?.policy ?? 'unknown',
     autoFixMaxPriority: config.integration?.auto_fix_max_priority ?? null,
     verifyConfigured: typeof config.commands?.verify === 'string' && config.commands.verify.length > 0,
