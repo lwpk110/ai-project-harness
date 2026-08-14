@@ -411,7 +411,7 @@ test('file creation is exclusive so concurrent writes fail safely', () => {
   } finally {
     fs.writeFileSync = originalWrite;
   }
-  assert.equal(fs.existsSync(target), false);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'concurrent\n');
 });
 
 test('executePlan rejects missing or duplicated review coverage', () => {

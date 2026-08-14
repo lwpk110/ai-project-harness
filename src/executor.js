@@ -93,15 +93,35 @@ function capture(root, operations) {
   return snapshots;
 }
 
-function rollback(root, snapshots) {
+function rollback(root, snapshots, appliedStates) {
+  const conflicts = [];
   for (const snapshot of [...snapshots].reverse()) {
+    const applied = appliedStates.get(snapshot.path);
+    if (snapshot.state === 'absent-directory') {
+      const childApplied = [...appliedStates.keys()].some(item => item.startsWith(`${snapshot.path}/`));
+      if (!childApplied) continue;
+    } else if (!applied) {
+      continue;
+    }
     const target = targetPath(root, snapshot.path);
-    if (snapshot.state === 'file') { ensureDir(path.dirname(target)); fs.writeFileSync(target, snapshot.content); }
-    else if ((snapshot.state === 'absent' || snapshot.state === 'absent-directory') && fs.existsSync(target)) {
-      if (fs.statSync(target).isDirectory()) fs.rmdirSync(target);
-      else fs.unlinkSync(target);
+    const current = currentState(root, { path: snapshot.path });
+    if (applied && !isDeepStrictEqual(current, applied)) {
+      conflicts.push(snapshot.path);
+      continue;
+    }
+    if (snapshot.state === 'file') {
+      ensureDir(path.dirname(target));
+      fs.writeFileSync(target, snapshot.content);
+    } else if ((snapshot.state === 'absent' || snapshot.state === 'absent-directory') && current.state !== 'absent') {
+      try {
+        if (current.state === 'directory') fs.rmdirSync(target);
+        else fs.unlinkSync(target);
+      } catch (error) {
+        conflicts.push(`${snapshot.path} (${error.message})`);
+      }
     }
   }
+  if (conflicts.length) throw new Error(`Rollback preserved externally changed paths: ${conflicts.join(', ')}`);
 }
 
 function selectOperations(plan, only) {
@@ -144,8 +164,12 @@ export function executePlan({ root, plan, expectedPlan, currentInputs, only, com
     ensureDir(path.dirname(backup));
     fs.writeFileSync(backup, snapshot.content);
   }
+  const appliedStates = new Map();
   try {
-    for (const operation of operations) applyOperation(root, operation);
+    for (const operation of operations) {
+      applyOperation(root, operation);
+      if (operation.path) appliedStates.set(operation.path, currentState(root, operation));
+    }
     const results = operations.map(operation => ({ id: operation.id, type: operation.type, path: operation.path ?? null, provider: operation.provider, status: 'applied' }));
     const files = {};
     for (const operation of operations.filter(item => item.path && item.type !== 'directory.ensure')) {
@@ -156,7 +180,7 @@ export function executePlan({ root, plan, expectedPlan, currentInputs, only, com
     if (commit) commit(result);
     return result;
   } catch (error) {
-    try { rollback(root, snapshots); }
+    try { rollback(root, snapshots, appliedStates); }
     catch (rollbackError) { throw new Error(`Apply failed: ${error.message}; rollback also failed: ${rollbackError.message}`); }
     throw new Error(`Apply failed and rolled back: ${error.message}`);
   }
