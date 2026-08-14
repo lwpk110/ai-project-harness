@@ -4,7 +4,7 @@
 
 - 产品名称：AI Project Harness
 - 文档版本：v0.1
-- 文档状态：M1/M2/M3 已实现，待 M3 试点验证
+- 文档状态：M1/M2/M3/M3.1 已实现，待 M3 试点验证
 - 目标读者：产品负责人、平台工程师、AI Agent 开发者、研发团队负责人
 
 ## 2. 背景与问题
@@ -464,6 +464,17 @@ v0.1 只交付声明式 manifest、启用/禁用、校验和权限展示所需�
 - 将项目根目录、生成的 agent 指令和统一验证命令显式交给 runtime；
 - headless 进程非零退出、ACP 协议错误、取消和权限拒绝均形成可审计结果；
 - 外部 runtime 不得绕过 `harness verify` 和项目策略。
+
+### 8.9 本地前后端联调面
+
+M3.1 提供 `harness serve`，在 `127.0.0.1` 启动同源静态控制台和 `harness.dev/http/v1` HTTP API。首个联调闭环包括：
+
+- 浏览器读取项目摘要和只读 audit 报告；
+- 浏览器请求生成不可变 Plan，并查看 Operation 范围、Provider、前置条件和 review 状态；
+- 浏览器请求 apply，仍由现有 CLI/Kernel 执行权限校验、stale 检测、验证和回滚；
+- API 不返回 Operation 内容或 Secret-like settings，避免控制台成为内容泄露通道。
+
+该适配器只绑定 loopback，当前通过子进程调用 CLI，不提供认证、公共网络监听、多用户会话或远程执行能力。后续需要先完成 hosted lifecycle、身份认证和授权协议，才能替换为可部署的后端服务。
 
 ## 9. Skill 规范
 

@@ -9,6 +9,7 @@ import { runAudit, validateAuditContributions } from './audit.js';
 import { buildPlan, inputDigests, validatePlanningContributions } from './planning.js';
 import { executePlan } from './executor.js';
 import { parsePluginManifest, parseProjectConfig, stringifyProjectConfig } from './manifest.js';
+import { startServer } from './server.js';
 
 const root = process.cwd();
 const moduleDir = fileURLToPath(new URL('.', import.meta.url));
@@ -193,7 +194,12 @@ function diff() { const state = loadState(); const changes = []; for (const [fil
 function doctor() { const config = parseConfig(); const errors = []; try { const resolved = resolveEnabledPlugins(config); validateAuditContributions(resolved); validatePlanningContributions(resolved); } catch (error) { errors.push(error.message); } for (const name of Object.keys(config.plugins ?? {})) { if (!isBuiltinPlugin(name)) { errors.push(`Unknown plugin: ${name}`); continue; } try { validatePlugin(name); } catch (error) { errors.push(error.message); } } const lock = loadLock(); if (lock && lock.schema !== 1) errors.push('harness.lock schema must be 1'); if (lock) for (const [name, entry] of Object.entries(lock.plugins ?? {})) { try { if (entry.integrity !== `sha256:${sha256(pluginManifest(name))}`) errors.push(`Lock integrity mismatch: ${name}`); } catch (error) { errors.push(error.message); } } if (!config.commands?.verify) errors.push('commands.verify is required'); if (errors.length) { console.error([...new Set(errors)].join('\n')); process.exitCode = 1; } else console.log('Harness doctor: OK'); }
 function runVerificationCommand(command) { if (process.platform === 'win32') execSync(command, { cwd: root, stdio: 'inherit' }); else { const [bin, ...args] = splitCommand(command); execFileSync(bin, args, { cwd: root, stdio: 'inherit' }); } }
 function verify() { const config = parseConfig(); const command = config.commands?.verify; if (!command) throw new Error('commands.verify is required'); runVerificationCommand(command); console.log('Harness verify: OK'); }
-function help() { console.log('harness init | adopt | audit | plan | apply | add <plugin> | remove <plugin> | enable <plugin> | disable <plugin> | plugin list|info|validate <plugin> | diff | sync | doctor | verify'); }
+function serve(options = {}) {
+  const port = Number(options.port ?? 3210);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('serve --port must be an integer between 0 and 65535');
+  startServer({ root, port });
+}
+function help() { console.log('harness init | adopt | audit | plan | apply | serve | add <plugin> | remove <plugin> | enable <plugin> | disable <plugin> | plugin list|info|validate <plugin> | diff | sync | doctor | verify'); }
 
 const { command, options, positional } = parseArgs(process.argv.slice(2));
 try {
@@ -210,5 +216,6 @@ try {
   else if (command === 'sync') syncLock();
   else if (command === 'doctor') doctor();
   else if (command === 'verify') verify();
+  else if (command === 'serve') serve(options);
   else help();
 } catch (error) { console.error(`harness: ${error.message}`); process.exitCode = 1; }
