@@ -35,6 +35,18 @@ these presets also generate the runtime-neutral `agent/` surface, package metada
 and optional GitHub Actions verification workflow. Initialization is idempotent and
 never overwrites existing project files.
 
+To install the current Harness checkout into a project's local `node_modules/.bin`,
+add `--local-bin` during initialization:
+
+```bash
+node src/cli.js init --preset agent-project --local-bin
+npx --no-install harness doctor
+npx --no-install harness audit
+```
+
+The local install is ignored by the generated `.gitignore`; it does not add a
+machine-specific dependency to the project's `package.json` or lockfile.
+
 ## Commands
 
 - `init`: initialize a Harness project. Use an explicit non-minimal preset to generate a complete AI Agent project scaffold.

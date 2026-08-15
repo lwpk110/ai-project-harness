@@ -67,7 +67,7 @@ function scaffoldFiles({ agents, preset }) {
   const runtimeText = agents.length ? agents.join(', ') : 'runtime-neutral';
   const name = projectName();
   const files = new Map([
-    ['README.md', `# ${name}\n\nThis project is initialized as a governed AI agent project with the AI Project Harness.\n\n## Harness CLI\n\nInstall the CLI from the published package (or use the source checkout during development):\n\n\`npx ai-project-harness@0.1.0 doctor\`\n\nReplace \`npx ai-project-harness@0.1.0\` with your pinned Harness command in the workflow below.\n\n## Development loop\n\n1. Read the project context and selected skills.\n2. Run \`npm test\` before delivery.\n3. Run \`npx ai-project-harness@0.1.0 audit\`, \`plan\`, and \`apply\` for governed changes.\n4. Run \`npm run verify\` before handing work back.\n\nPreset: \`${preset}\`\nSelected runtimes: ${runtimeText}\n`],
+    ['README.md', `# ${name}\n\nThis project is initialized as a governed AI agent project with the AI Project Harness.\n\n## Harness CLI\n\nInstall the CLI from the published package (or use the source checkout during development):\n\n\`npx ai-project-harness@0.1.0 doctor\`\n\nFor a local checkout, install its executable into this project's bin directory:\n\n\`npm install --no-save --package-lock=false /path/to/ai-project-harness\`\n\nThen use the local shortcut: \`npx --no-install harness doctor\`. On Windows, use \`node_modules\\.bin\\harness.cmd\`.\n\nReplace \`npx ai-project-harness@0.1.0\` with your pinned Harness command in the workflow below.\n\n## Development loop\n\n1. Read the project context and selected skills.\n2. Run \`npm test\` before delivery.\n3. Run \`npx ai-project-harness@0.1.0 audit\`, \`plan\`, and \`apply\` for governed changes.\n4. Run \`npm run verify\` before handing work back.\n\nPreset: \`${preset}\`\nSelected runtimes: ${runtimeText}\n`],
     ['AGENTS.md', `# Agent instructions\n\nThis repository is governed by AI Project Harness.\n\n## Required loop\n\n- Inspect the repository before editing.\n- Keep changes within the approved Plan when one exists.\n- Run \`npm test\` and \`npm run verify\` before delivery.\n- Do not add credentials, recovery snapshots, or machine-local state.\n\n## Agent project\n\n- Preset: \`${preset}\`\n- Runtime adapters: ${runtimeText}\n- Governed flow: audit -> plan -> apply -> verify\n`],
     ['.gitignore', 'node_modules/\n.env\n.harness/state.json\n.harness/cache/\n.harness/recovery/\n*.log\n'],
     ['agent/README.md', `# Agent Project Surface\n\nThis directory contains runtime-neutral material shared by AI coding agents.\n\n- \`workflows/\`: repeatable project workflows.\n- \`skills/\`: focused task instructions and output contracts.\n- \`connectors/\`: declared external capabilities; credentials are never stored here.\n`],
@@ -93,10 +93,17 @@ function githubWorkflow({ installCommand = 'npm ci' } = {}) {
   return `name: Verify\n\non:\n  push:\n    branches: [main, master]\n  pull_request:\n\npermissions:\n  contents: read\n\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20.x\n          cache: npm\n      - run: ${installCommand}\n      - run: npm run verify\n`;
 }
 
+function installLocalCli() {
+  const source = path.resolve(moduleDir, '..');
+  const quotedSource = process.platform === 'win32' ? `"${source.replaceAll('"', '\\"')}"` : JSON.stringify(source);
+  execSync(`npm install --no-save --package-lock=false ${quotedSource}`, { cwd: root, stdio: 'inherit' });
+}
+
 function init(options = {}) {
-  const allowedOptions = new Set(['preset', 'agents', 'ci', 'adopt']);
+  const allowedOptions = new Set(['preset', 'agents', 'ci', 'adopt', 'local-bin']);
   for (const option of Object.keys(options)) if (!allowedOptions.has(option)) throw new Error(`Unknown init option: --${option}`);
   const adopt = options.adopt === true;
+  const localBin = options['local-bin'] === true;
   const preset = String(options.preset ?? 'minimal');
   const scaffold = !adopt && options.preset !== undefined && preset !== 'minimal';
   if (!scaffoldPresets.has(preset)) throw new Error(`Unknown init preset: ${preset}`);
@@ -121,7 +128,7 @@ function init(options = {}) {
   } else if (scaffold) {
     for (const [file, content] of scaffoldFiles({ agents, preset })) if (file !== 'AGENTS.md') created.push(writeIfMissing(path.join(root, file), content));
   }
-  if (scaffold && !exists(path.join(root, 'package.json'))) {
+  if ((scaffold || localBin) && !exists(path.join(root, 'package.json'))) {
     const packageFiles = nodePackage();
     created.push(writeIfMissing(path.join(root, 'package.json'), packageFiles.package));
     created.push(writeIfMissing(path.join(root, 'package-lock.json'), packageFiles.lock));
@@ -130,7 +137,8 @@ function init(options = {}) {
     const installCommand = exists(path.join(root, 'package-lock.json')) || exists(path.join(root, 'npm-shrinkwrap.json')) ? 'npm ci' : 'npm install';
     created.push(writeIfMissing(path.join(root, '.github', 'workflows', 'verify.yml'), githubWorkflow({ installCommand })));
   }
-  console.log(`Initialized AI Project Harness in ${root} (${preset}; ${created.filter(Boolean).length} files created)`);
+  if (localBin) installLocalCli();
+  console.log(`Initialized AI Project Harness in ${root} (${preset}; ${created.filter(Boolean).length} files created)${localBin ? '; local bin installed' : ''}`);
 }
 function audit(options = {}) {
   const config = parseConfig();
@@ -285,7 +293,7 @@ function serve(options = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('serve --port must be an integer between 0 and 65535');
   startServer({ root, port });
 }
-function help() { console.log('harness init [--preset agent-project] [--agents codex,claude] [--ci github] | adopt | audit | plan | apply | serve | add <plugin> | remove <plugin> | enable <plugin> | disable <plugin> | plugin list|info|validate <plugin> | diff | sync | doctor | verify'); }
+function help() { console.log('harness init [--preset agent-project] [--agents codex,claude] [--ci github] [--local-bin] | adopt | audit | plan | apply | serve | add <plugin> | remove <plugin> | enable <plugin> | disable <plugin> | plugin list|info|validate <plugin> | diff | sync | doctor | verify'); }
 
 const { command, options, positional } = parseArgs(process.argv.slice(2));
 try {

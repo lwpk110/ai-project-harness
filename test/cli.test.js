@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { discoverBundledPlugins } from '../src/catalog.js';
 import { createProjectView, runAudit, validateAuditContributions } from '../src/audit.js';
 import { buildPlan, computePlanId, inputDigests, validatePlanningContributions } from '../src/planning.js';
@@ -62,6 +62,17 @@ test('init creates an idempotent runtime-neutral AI agent project scaffold', () 
   assert.equal(fs.readFileSync(path.join(cwd, 'AGENTS.md'), 'utf8'), agentsBefore);
   assert.match(run(cwd, 'doctor'), /OK/);
   assert.match(run(cwd, 'verify'), /Harness verify: OK/);
+});
+
+test('init --local-bin installs a terminal shortcut in the project bin directory', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-local-bin-'));
+  run(cwd, 'init', '--preset', 'agent-project', '--local-bin');
+  const executable = path.join(cwd, 'node_modules', '.bin', process.platform === 'win32' ? 'harness.cmd' : 'harness');
+  assert.equal(fs.existsSync(executable), true);
+  const command = process.platform === 'win32' ? `"${executable}" doctor` : `${executable} doctor`;
+  assert.match(execSync(command, { cwd, encoding: 'utf8' }), /Harness doctor: OK/);
+  assert.doesNotMatch(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'), /ai-project-harness/);
+  assert.doesNotMatch(fs.readFileSync(path.join(cwd, 'package-lock.json'), 'utf8'), /ai-project-harness/);
 });
 
 test('specialized presets add an explicit verification surface', () => {
