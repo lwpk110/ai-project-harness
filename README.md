@@ -2,17 +2,20 @@
 
 AI Project Harness provides a CLI for initializing and adopting a governed workspace for AI coding agents.
 
-Its direction is a governed microkernel: the kernel owns permissions, plans, transactions, audit, ownership, and rollback; every project-specific capability is delivered by a plugin. See [Architecture](docs/architecture.md), [Plugin Architecture](docs/plugin-architecture.md), and [ADR 0001](docs/decisions/0001-every-product-capability-is-a-plugin.md).
+Its direction is a governed microkernel: the kernel owns permissions, plans, transactions, audit, ownership, and rollback; every project-specific capability is delivered by a plugin. The v0.2 product direction adds a canonical `.harness` capability plane, local MCP routing, and governed agent-native projections so one capability set can serve multiple agent CLIs without replacing their native launch commands. See [PRD v0.2](docs/ai-project-harness-prd-v0.2.md), [Architecture](docs/architecture.md), [Plugin Architecture](docs/plugin-architecture.md), [ADR 0001](docs/decisions/0001-every-product-capability-is-a-plugin.md), [ADR 0002](docs/decisions/0002-unified-multi-agent-harness-capability-plane.md), [ADR 0003](docs/decisions/0003-capability-ir-and-reproducible-native-projections.md), and [ADR 0004](docs/decisions/0004-native-agent-activation-and-local-mcp-session-topology.md).
 
 ## Quick start
 
-To create a new project with the published CLI:
+The current checkout is not published to npm. Install it globally from the source checkout:
 
 ```bash
-mkdir my-agent-project
-cd my-agent-project
-npx ai-project-harness@0.1.0 init --preset agent-project --agents codex,claude --ci github
-npx ai-project-harness@0.1.0 doctor
+cd /path/to/ai-project-harness
+npm install
+npm install --global .
+mkdir /path/to/my-agent-project
+cd /path/to/my-agent-project
+harness init --preset agent-project --agents codex claude --ci github
+harness doctor
 ```
 
 To develop this Harness repository itself:

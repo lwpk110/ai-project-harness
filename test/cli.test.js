@@ -56,7 +56,7 @@ test('init creates an idempotent runtime-neutral AI agent project scaffold', () 
   assert.deepEqual(config.project.agents, ['codex', 'claude']);
   assert.equal(config.project.ci, 'github');
   assert.match(fs.readFileSync(path.join(cwd, 'AGENTS.md'), 'utf8'), /audit -> plan -> apply -> verify/);
-  assert.match(fs.readFileSync(path.join(cwd, 'README.md'), 'utf8'), /npx ai-project-harness@0\.1\.0 doctor/);
+  assert.match(fs.readFileSync(path.join(cwd, 'README.md'), 'utf8'), /npx --no-install harness doctor/);
   const agentsBefore = fs.readFileSync(path.join(cwd, 'AGENTS.md'), 'utf8');
   run(cwd, 'init', '--preset', 'agent-project', '--agents', 'codex,claude', '--ci', 'github');
   assert.equal(fs.readFileSync(path.join(cwd, 'AGENTS.md'), 'utf8'), agentsBefore);
@@ -96,6 +96,13 @@ test('github CI uses install when an adopted package has no lockfile', () => {
 test('init rejects unknown options instead of silently ignoring them', () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-init-options-'));
   assert.throws(() => run(cwd, 'init', '--c1', 'github'), /Unknown init option: --c1/);
+});
+
+test('init accepts split comma-list arguments from PowerShell wrappers', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-init-split-list-'));
+  run(cwd, 'init', '--preset', 'agent-project', '--agents', 'codex', 'claude');
+  const config = parseProjectConfig(fs.readFileSync(path.join(cwd, 'harness.yaml'), 'utf8'));
+  assert.deepEqual(config.project.agents, ['codex', 'claude']);
 });
 
 test('plugin dependency ranges are enforced before activation', () => {

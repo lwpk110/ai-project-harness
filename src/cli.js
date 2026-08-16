@@ -31,7 +31,11 @@ function parseArgs(argv) {
   const positional = [];
   for (let i = 0; i < rest.length; i += 1) {
     const item = rest[i];
-    if (item.startsWith('--')) options[item.slice(2)] = rest[i + 1]?.startsWith('--') ? true : (rest[++i] ?? true);
+    if (item.startsWith('--')) {
+      const values = [];
+      while (i + 1 < rest.length && !rest[i + 1].startsWith('--')) values.push(rest[++i]);
+      options[item.slice(2)] = values.length ? values.join(',') : true;
+    }
     else positional.push(item);
   }
   return { command, options, positional };
@@ -67,11 +71,11 @@ function scaffoldFiles({ agents, preset }) {
   const runtimeText = agents.length ? agents.join(', ') : 'runtime-neutral';
   const name = projectName();
   const files = new Map([
-    ['README.md', `# ${name}\n\nThis project is initialized as a governed AI agent project with the AI Project Harness.\n\n## Harness CLI\n\nInstall the CLI from the published package (or use the source checkout during development):\n\n\`npx ai-project-harness@0.1.0 doctor\`\n\nFor a local checkout, install its executable into this project's bin directory:\n\n\`npm install --no-save --package-lock=false /path/to/ai-project-harness\`\n\nThen use the local shortcut: \`npx --no-install harness doctor\`. On Windows, use \`node_modules\\.bin\\harness.cmd\`.\n\nReplace \`npx ai-project-harness@0.1.0\` with your pinned Harness command in the workflow below.\n\n## Development loop\n\n1. Read the project context and selected skills.\n2. Run \`npm test\` before delivery.\n3. Run \`npx ai-project-harness@0.1.0 audit\`, \`plan\`, and \`apply\` for governed changes.\n4. Run \`npm run verify\` before handing work back.\n\nPreset: \`${preset}\`\nSelected runtimes: ${runtimeText}\n`],
+    ['README.md', `# ${name}\n\nThis project is initialized as a governed AI agent project with the AI Project Harness.\n\n## Harness CLI\n\nThe current development checkout is not published to npm. Install this checkout globally:\n\n\`npm install --global /path/to/ai-project-harness\`\n\nOr install it into this project only:\n\n\`npm install --no-save --package-lock=false /path/to/ai-project-harness\`\n\nThen use the local shortcut: \`npx --no-install harness doctor\`. On Windows, use \`node_modules\\.bin\\harness.cmd\`.\n\n## Development loop\n\n1. Read the project context and selected skills.\n2. Run \`npm test\` before delivery.\n3. Run \`npx --no-install harness audit\`, \`plan\`, and \`apply\` for governed changes.\n4. Run \`npm run verify\` before handing work back.\n\nPreset: \`${preset}\`\nSelected runtimes: ${runtimeText}\n`],
     ['AGENTS.md', `# Agent instructions\n\nThis repository is governed by AI Project Harness.\n\n## Required loop\n\n- Inspect the repository before editing.\n- Keep changes within the approved Plan when one exists.\n- Run \`npm test\` and \`npm run verify\` before delivery.\n- Do not add credentials, recovery snapshots, or machine-local state.\n\n## Agent project\n\n- Preset: \`${preset}\`\n- Runtime adapters: ${runtimeText}\n- Governed flow: audit -> plan -> apply -> verify\n`],
     ['.gitignore', 'node_modules/\n.env\n.harness/state.json\n.harness/cache/\n.harness/recovery/\n*.log\n'],
     ['agent/README.md', `# Agent Project Surface\n\nThis directory contains runtime-neutral material shared by AI coding agents.\n\n- \`workflows/\`: repeatable project workflows.\n- \`skills/\`: focused task instructions and output contracts.\n- \`connectors/\`: declared external capabilities; credentials are never stored here.\n`],
-    ['agent/workflows/governed-change.md', '# Governed Change\n\n1. Inspect the project and read relevant skills.\n2. Run `npx ai-project-harness@0.1.0 audit --format markdown`.\n3. Generate and review a Plan with `npx ai-project-harness@0.1.0 plan`.\n4. Apply only approved operations with `npx ai-project-harness@0.1.0 apply`.\n5. Run `npm run verify` and report evidence.\n'],
+    ['agent/workflows/governed-change.md', '# Governed Change\n\n1. Inspect the project and read relevant skills.\n2. Run `npx --no-install harness audit --format markdown`.\n3. Generate and review a Plan with `npx --no-install harness plan`.\n4. Apply only approved operations with `npx --no-install harness apply`.\n5. Run `npm run verify` and report evidence.\n'],
     ['agent/skills/project-verification/SKILL.md', '# Project Verification\n\n## Purpose\n\nProduce repeatable evidence that the project is healthy before delivery.\n\n## Contract\n\n- Run `npm test`.\n- Run `npm run verify`.\n- Report commands, exit status, and relevant failures.\n- Do not modify source files while verifying.\n'],
     ['agent/connectors/README.md', '# Connectors\n\nExternal capabilities must be declared as Harness plugins and approved by policy.\nDo not place API keys, tokens, or session files in this directory.\n'],
     ['test/harness-scaffold.test.js', `import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport fs from 'node:fs';\n\ntest('generated project includes its governance surface', () => {\n  assert.equal(fs.existsSync('harness.yaml'), true);\n  assert.equal(fs.existsSync('AGENTS.md'), true);\n  assert.equal(fs.existsSync('agent/workflows/governed-change.md'), true);\n});\n`]
