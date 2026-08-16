@@ -8,7 +8,8 @@
   },
   "scripts": {
     "test": "node --test",
-    "verify": "node src/cli.js doctor && node src/cli.js verify"
+    "verify": "node src/cli.js doctor && node src/cli.js verify",
+    "start": "node src/cli.js serve"
   },
   "engines": {
     "node": ">=20"

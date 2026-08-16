@@ -9,6 +9,7 @@ import { runAudit, validateAuditContributions } from './audit.js';
 import { buildPlan, inputDigests, validatePlanningContributions } from './planning.js';
 import { executePlan } from './executor.js';
 import { parsePluginManifest, parseProjectConfig, stringifyProjectConfig } from './manifest.js';
+import { startServer } from './server.js';
 
 const root = process.cwd();
 const moduleDir = fileURLToPath(new URL('.', import.meta.url));
@@ -30,7 +31,11 @@ function parseArgs(argv) {
   const positional = [];
   for (let i = 0; i < rest.length; i += 1) {
     const item = rest[i];
-    if (item.startsWith('--')) options[item.slice(2)] = rest[i + 1]?.startsWith('--') ? true : (rest[++i] ?? true);
+    if (item.startsWith('--')) {
+      const values = [];
+      while (i + 1 < rest.length && !rest[i + 1].startsWith('--')) values.push(rest[++i]);
+      options[item.slice(2)] = values.length ? values.join(',') : true;
+    }
     else positional.push(item);
   }
   return { command, options, positional };
@@ -49,11 +54,95 @@ function loadLock() { return exists(lockPath) ? JSON.parse(readText(lockPath)) :
 function saveLock(lock) { write(lockPath, `${JSON.stringify(lock, null, 2)}\n`); }
 function saveState(state) { ensureDir(harnessDir); write(statePath, `${JSON.stringify(state, null, 2)}\n`); }
 
-function init() {
-  if (!exists(configPath)) write(configPath, readText(path.join(moduleDir, '..', 'harness.yaml')));
+const scaffoldPresets = new Set(['agent-project', 'minimal', 'startup-web', 'backend-service']);
+const scaffoldCi = new Set(['none', 'github']);
+
+function optionList(value, label) {
+  if (value === undefined || value === true || value === '') return [];
+  const values = String(value).split(',').map(item => item.trim()).filter(Boolean);
+  if (values.some(item => !/^[a-z0-9][a-z0-9._-]*$/i.test(item))) throw new Error(`${label} must be a comma-separated list of names`);
+  return [...new Set(values)];
+}
+
+function projectName() { return path.basename(path.resolve(root)); }
+function writeIfMissing(file, content) { if (exists(file)) return false; write(file, content); return true; }
+
+function scaffoldFiles({ agents, preset }) {
+  const runtimeText = agents.length ? agents.join(', ') : 'runtime-neutral';
+  const name = projectName();
+  const files = new Map([
+    ['README.md', `# ${name}\n\nThis project is initialized as a governed AI agent project with the AI Project Harness.\n\n## Harness CLI\n\nThe current development checkout is not published to npm. Install this checkout globally:\n\n\`npm install --global /path/to/ai-project-harness\`\n\nOr install it into this project only:\n\n\`npm install --no-save --package-lock=false /path/to/ai-project-harness\`\n\nThen use the local shortcut: \`npx --no-install harness doctor\`. On Windows, use \`node_modules\\.bin\\harness.cmd\`.\n\n## Development loop\n\n1. Read the project context and selected skills.\n2. Run \`npm test\` before delivery.\n3. Run \`npx --no-install harness audit\`, \`plan\`, and \`apply\` for governed changes.\n4. Run \`npm run verify\` before handing work back.\n\nPreset: \`${preset}\`\nSelected runtimes: ${runtimeText}\n`],
+    ['AGENTS.md', `# Agent instructions\n\nThis repository is governed by AI Project Harness.\n\n## Required loop\n\n- Inspect the repository before editing.\n- Keep changes within the approved Plan when one exists.\n- Run \`npm test\` and \`npm run verify\` before delivery.\n- Do not add credentials, recovery snapshots, or machine-local state.\n\n## Agent project\n\n- Preset: \`${preset}\`\n- Runtime adapters: ${runtimeText}\n- Governed flow: audit -> plan -> apply -> verify\n`],
+    ['.gitignore', 'node_modules/\n.env\n.harness/state.json\n.harness/cache/\n.harness/recovery/\n*.log\n'],
+    ['agent/README.md', `# Agent Project Surface\n\nThis directory contains runtime-neutral material shared by AI coding agents.\n\n- \`workflows/\`: repeatable project workflows.\n- \`skills/\`: focused task instructions and output contracts.\n- \`connectors/\`: declared external capabilities; credentials are never stored here.\n`],
+    ['agent/workflows/governed-change.md', '# Governed Change\n\n1. Inspect the project and read relevant skills.\n2. Run `npx --no-install harness audit --format markdown`.\n3. Generate and review a Plan with `npx --no-install harness plan`.\n4. Apply only approved operations with `npx --no-install harness apply`.\n5. Run `npm run verify` and report evidence.\n'],
+    ['agent/skills/project-verification/SKILL.md', '# Project Verification\n\n## Purpose\n\nProduce repeatable evidence that the project is healthy before delivery.\n\n## Contract\n\n- Run `npm test`.\n- Run `npm run verify`.\n- Report commands, exit status, and relevant failures.\n- Do not modify source files while verifying.\n'],
+    ['agent/connectors/README.md', '# Connectors\n\nExternal capabilities must be declared as Harness plugins and approved by policy.\nDo not place API keys, tokens, or session files in this directory.\n'],
+    ['test/harness-scaffold.test.js', `import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport fs from 'node:fs';\n\ntest('generated project includes its governance surface', () => {\n  assert.equal(fs.existsSync('harness.yaml'), true);\n  assert.equal(fs.existsSync('AGENTS.md'), true);\n  assert.equal(fs.existsSync('agent/workflows/governed-change.md'), true);\n});\n`]
+  ]);
+  if (preset === 'startup-web') files.set('agent/skills/web-verification/SKILL.md', '# Web Verification\n\nRecord browser/API checks and attach reproducible evidence before delivery.\n');
+  if (preset === 'backend-service') files.set('agent/skills/service-verification/SKILL.md', '# Service Verification\n\nRecord contract, health, and integration checks before delivery.\n');
+  return files;
+}
+
+function nodePackage() {
+  const name = projectName().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'agent-project';
+  return {
+    package: `${JSON.stringify({ name, version: '0.1.0', private: true, type: 'module', scripts: { test: 'node --test', verify: 'node --test' } }, null, 2)}\n`,
+    lock: `${JSON.stringify({ name, version: '0.1.0', lockfileVersion: 3, requires: true, packages: { '': { name, version: '0.1.0', private: true, type: 'module', scripts: { test: 'node --test', verify: 'node --test' } } } }, null, 2)}\n`
+  };
+}
+
+function githubWorkflow({ installCommand = 'npm ci' } = {}) {
+  return `name: Verify\n\non:\n  push:\n    branches: [main, master]\n  pull_request:\n\npermissions:\n  contents: read\n\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20.x\n          cache: npm\n      - run: ${installCommand}\n      - run: npm run verify\n`;
+}
+
+function installLocalCli() {
+  const source = path.resolve(moduleDir, '..');
+  const quotedSource = process.platform === 'win32' ? `"${source.replaceAll('"', '\\"')}"` : JSON.stringify(source);
+  execSync(`npm install --no-save --package-lock=false ${quotedSource}`, { cwd: root, stdio: 'inherit' });
+}
+
+function init(options = {}) {
+  const allowedOptions = new Set(['preset', 'agents', 'ci', 'adopt', 'local-bin']);
+  for (const option of Object.keys(options)) if (!allowedOptions.has(option)) throw new Error(`Unknown init option: --${option}`);
+  const adopt = options.adopt === true;
+  const localBin = options['local-bin'] === true;
+  const preset = String(options.preset ?? 'minimal');
+  const scaffold = !adopt && options.preset !== undefined && preset !== 'minimal';
+  if (!scaffoldPresets.has(preset)) throw new Error(`Unknown init preset: ${preset}`);
+  const agents = optionList(options.agents, '--agents');
+  const ci = String(options.ci ?? 'none').toLowerCase();
+  if (!scaffoldCi.has(ci)) throw new Error(`Unknown CI provider: ${ci}`);
+  if (!exists(configPath)) {
+    const template = readText(path.join(moduleDir, '..', 'harness.yaml'));
+    if (scaffold) {
+      const config = parseProjectConfig(template);
+      config.project = { ...config.project, mode: 'new', preset, agents, ci };
+      write(configPath, stringifyProjectConfig(config));
+    } else {
+      write(configPath, template);
+    }
+  }
   ensureDir(harnessDir);
-  if (!exists(path.join(root, 'AGENTS.md'))) write(path.join(root, 'AGENTS.md'), '# Agent instructions\n\nRun the project verification command before delivery.\n');
-  console.log(`Initialized AI Project Harness in ${root}`);
+  const created = [];
+  if (!exists(path.join(root, 'AGENTS.md'))) {
+    if (adopt || !scaffold) created.push(writeIfMissing(path.join(root, 'AGENTS.md'), '# Agent instructions\n\nRun the project verification command before delivery.\n'));
+    else for (const [file, content] of scaffoldFiles({ agents, preset })) created.push(writeIfMissing(path.join(root, file), content));
+  } else if (scaffold) {
+    for (const [file, content] of scaffoldFiles({ agents, preset })) if (file !== 'AGENTS.md') created.push(writeIfMissing(path.join(root, file), content));
+  }
+  if ((scaffold || localBin) && !exists(path.join(root, 'package.json'))) {
+    const packageFiles = nodePackage();
+    created.push(writeIfMissing(path.join(root, 'package.json'), packageFiles.package));
+    created.push(writeIfMissing(path.join(root, 'package-lock.json'), packageFiles.lock));
+  }
+  if (scaffold && ci === 'github') {
+    const installCommand = exists(path.join(root, 'package-lock.json')) || exists(path.join(root, 'npm-shrinkwrap.json')) ? 'npm ci' : 'npm install';
+    created.push(writeIfMissing(path.join(root, '.github', 'workflows', 'verify.yml'), githubWorkflow({ installCommand })));
+  }
+  if (localBin) installLocalCli();
+  console.log(`Initialized AI Project Harness in ${root} (${preset}; ${created.filter(Boolean).length} files created)${localBin ? '; local bin installed' : ''}`);
 }
 function audit(options = {}) {
   const config = parseConfig();
@@ -141,7 +230,15 @@ function validatePlugin(name) {
   if (compatibility && !satisfiesVersionRange(harnessVersion, compatibility)) throw new Error(`Plugin ${name} requires harness ${compatibility}, current version is ${harnessVersion}`);
   return { name: manifest.metadata.name, version: manifest.metadata.version, apiVersion: manifest.apiVersion, kind: manifest.kind };
 }
-function pluginDependencies(loaded) { return Object.keys(loaded.manifest.dependencies?.plugins ?? {}).sort(); }
+function pluginDependencies(loaded) { return Object.entries(loaded.manifest.dependencies?.plugins ?? {}).sort(([left], [right]) => left.localeCompare(right)); }
+function validatePluginDependencies(loaded) {
+  for (const [dependency, range] of pluginDependencies(loaded)) {
+    const dependencyManifest = loadPluginManifest(dependency).manifest;
+    if (range && !satisfiesVersionRange(dependencyManifest.metadata.version, range)) {
+      throw new Error(`Plugin ${loaded.manifest.metadata.name} requires dependency ${dependency} ${range}, found ${dependencyManifest.metadata.version}`);
+    }
+  }
+}
 function resolveEnabledPlugins(config) {
   const enabled = new Set(Object.entries(config.plugins ?? {}).filter(([, entry]) => pluginEnabled(entry)).map(([name]) => name));
   const active = new Map();
@@ -155,7 +252,8 @@ function resolveEnabledPlugins(config) {
     visiting.add(name);
     const loaded = loadPluginManifest(name);
     validatePlugin(name);
-    for (const dependency of pluginDependencies(loaded)) visit(dependency);
+    validatePluginDependencies(loaded);
+    for (const [dependency] of pluginDependencies(loaded)) visit(dependency);
     visiting.delete(name);
     active.set(name, loaded);
     ordered.push(name);
@@ -179,7 +277,8 @@ function enablePluginWithDependencies(name, config, visiting = new Set()) {
   visiting.add(name);
   const loaded = loadPluginManifest(name);
   validatePlugin(name);
-  for (const dependency of pluginDependencies(loaded)) enablePluginWithDependencies(dependency, config, visiting);
+  validatePluginDependencies(loaded);
+  for (const [dependency] of pluginDependencies(loaded)) enablePluginWithDependencies(dependency, config, visiting);
   visiting.delete(name);
   const entry = config.plugins[name];
   config.plugins[name] = entry !== null && typeof entry === 'object' ? { ...entry, enabled: true } : true;
@@ -193,11 +292,17 @@ function diff() { const state = loadState(); const changes = []; for (const [fil
 function doctor() { const config = parseConfig(); const errors = []; try { const resolved = resolveEnabledPlugins(config); validateAuditContributions(resolved); validatePlanningContributions(resolved); } catch (error) { errors.push(error.message); } for (const name of Object.keys(config.plugins ?? {})) { if (!isBuiltinPlugin(name)) { errors.push(`Unknown plugin: ${name}`); continue; } try { validatePlugin(name); } catch (error) { errors.push(error.message); } } const lock = loadLock(); if (lock && lock.schema !== 1) errors.push('harness.lock schema must be 1'); if (lock) for (const [name, entry] of Object.entries(lock.plugins ?? {})) { try { if (entry.integrity !== `sha256:${sha256(pluginManifest(name))}`) errors.push(`Lock integrity mismatch: ${name}`); } catch (error) { errors.push(error.message); } } if (!config.commands?.verify) errors.push('commands.verify is required'); if (errors.length) { console.error([...new Set(errors)].join('\n')); process.exitCode = 1; } else console.log('Harness doctor: OK'); }
 function runVerificationCommand(command) { if (process.platform === 'win32') execSync(command, { cwd: root, stdio: 'inherit' }); else { const [bin, ...args] = splitCommand(command); execFileSync(bin, args, { cwd: root, stdio: 'inherit' }); } }
 function verify() { const config = parseConfig(); const command = config.commands?.verify; if (!command) throw new Error('commands.verify is required'); runVerificationCommand(command); console.log('Harness verify: OK'); }
-function help() { console.log('harness init | adopt | audit | plan | apply | add <plugin> | remove <plugin> | enable <plugin> | disable <plugin> | plugin list|info|validate <plugin> | diff | sync | doctor | verify'); }
+function serve(options = {}) {
+  const port = Number(options.port ?? 3210);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('serve --port must be an integer between 0 and 65535');
+  startServer({ root, port });
+}
+function help() { console.log('harness init [--preset agent-project] [--agents codex,claude] [--ci github] [--local-bin] | adopt | audit | plan | apply | serve | add <plugin> | remove <plugin> | enable <plugin> | disable <plugin> | plugin list|info|validate <plugin> | diff | sync | doctor | verify'); }
 
 const { command, options, positional } = parseArgs(process.argv.slice(2));
 try {
-  if (command === 'init' || command === 'adopt') init();
+  if (command === 'init') init(options);
+  else if (command === 'adopt') init({ ...options, adopt: true });
   else if (command === 'audit') audit(options);
   else if (command === 'plan') plan();
   else if (command === 'apply') apply(options);
@@ -210,5 +315,6 @@ try {
   else if (command === 'sync') syncLock();
   else if (command === 'doctor') doctor();
   else if (command === 'verify') verify();
+  else if (command === 'serve') serve(options);
   else help();
 } catch (error) { console.error(`harness: ${error.message}`); process.exitCode = 1; }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { discoverBundledPlugins } from '../src/catalog.js';
 import { createProjectView, runAudit, validateAuditContributions } from '../src/audit.js';
 import { buildPlan, computePlanId, inputDigests, validatePlanningContributions } from '../src/planning.js';
@@ -31,6 +31,86 @@ test('project configuration preserves nested plugin settings through structured 
   assert.deepEqual(config.plugins['spec-driven'].contributions.workflows, ['spec-driven-development']);
   assert.equal(parseProjectConfig(stringifyProjectConfig(config)).preset, 'startup-web');
   assert.throws(() => parseProjectConfig('plugins:\n  spec-driven: enabled\n'), /plugins.spec-driven must be a boolean or mapping/);
+});
+
+test('init creates an idempotent runtime-neutral AI agent project scaffold', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-agent-project-'));
+  run(cwd, 'init', '--preset', 'agent-project', '--agents', 'codex,claude', '--ci', 'github');
+  const expected = [
+    'harness.yaml',
+    'AGENTS.md',
+    'README.md',
+    '.gitignore',
+    'package.json',
+    'package-lock.json',
+    'agent/README.md',
+    'agent/workflows/governed-change.md',
+    'agent/skills/project-verification/SKILL.md',
+    'agent/connectors/README.md',
+    'test/harness-scaffold.test.js',
+    '.github/workflows/verify.yml'
+  ];
+  for (const file of expected) assert.equal(fs.existsSync(path.join(cwd, file)), true, file);
+  const config = parseProjectConfig(fs.readFileSync(path.join(cwd, 'harness.yaml'), 'utf8'));
+  assert.equal(config.project.preset, 'agent-project');
+  assert.deepEqual(config.project.agents, ['codex', 'claude']);
+  assert.equal(config.project.ci, 'github');
+  assert.match(fs.readFileSync(path.join(cwd, 'AGENTS.md'), 'utf8'), /audit -> plan -> apply -> verify/);
+  assert.match(fs.readFileSync(path.join(cwd, 'README.md'), 'utf8'), /npx --no-install harness doctor/);
+  const agentsBefore = fs.readFileSync(path.join(cwd, 'AGENTS.md'), 'utf8');
+  run(cwd, 'init', '--preset', 'agent-project', '--agents', 'codex,claude', '--ci', 'github');
+  assert.equal(fs.readFileSync(path.join(cwd, 'AGENTS.md'), 'utf8'), agentsBefore);
+  assert.match(run(cwd, 'doctor'), /OK/);
+  assert.match(run(cwd, 'verify'), /Harness verify: OK/);
+});
+
+test('init --local-bin installs a terminal shortcut in the project bin directory', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-local-bin-'));
+  run(cwd, 'init', '--preset', 'agent-project', '--local-bin');
+  const executable = path.join(cwd, 'node_modules', '.bin', process.platform === 'win32' ? 'harness.cmd' : 'harness');
+  assert.equal(fs.existsSync(executable), true);
+  const command = process.platform === 'win32' ? `"${executable}" doctor` : `${executable} doctor`;
+  assert.match(execSync(command, { cwd, encoding: 'utf8' }), /Harness doctor: OK/);
+  assert.doesNotMatch(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'), /ai-project-harness/);
+  assert.doesNotMatch(fs.readFileSync(path.join(cwd, 'package-lock.json'), 'utf8'), /ai-project-harness/);
+});
+
+test('specialized presets add an explicit verification surface', () => {
+  const web = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-web-preset-'));
+  const service = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-service-preset-'));
+  run(web, 'init', '--preset', 'startup-web');
+  run(service, 'init', '--preset', 'backend-service');
+  assert.equal(fs.existsSync(path.join(web, 'agent', 'skills', 'web-verification', 'SKILL.md')), true);
+  assert.equal(fs.existsSync(path.join(service, 'agent', 'skills', 'service-verification', 'SKILL.md')), true);
+  assert.equal(fs.existsSync(path.join(web, 'agent', 'skills', 'service-verification', 'SKILL.md')), false);
+});
+
+test('github CI uses install when an adopted package has no lockfile', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-ci-existing-package-'));
+  fs.writeFileSync(path.join(cwd, 'package.json'), '{"name":"existing-project","private":true}\n');
+  run(cwd, 'init', '--preset', 'agent-project', '--ci', 'github');
+  assert.match(fs.readFileSync(path.join(cwd, '.github', 'workflows', 'verify.yml'), 'utf8'), /- run: npm install/);
+  assert.equal(fs.existsSync(path.join(cwd, 'package-lock.json')), false);
+});
+
+test('init rejects unknown options instead of silently ignoring them', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-init-options-'));
+  assert.throws(() => run(cwd, 'init', '--c1', 'github'), /Unknown init option: --c1/);
+});
+
+test('init accepts split comma-list arguments from PowerShell wrappers', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-init-split-list-'));
+  run(cwd, 'init', '--preset', 'agent-project', '--agents', 'codex', 'claude');
+  const config = parseProjectConfig(fs.readFileSync(path.join(cwd, 'harness.yaml'), 'utf8'));
+  assert.deepEqual(config.project.agents, ['codex', 'claude']);
+});
+
+test('plugin dependency ranges are enforced before activation', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-plugin-range-'));
+  run(cwd, 'init');
+  fs.mkdirSync(path.join(cwd, 'plugins', 'spec-driven'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, 'plugins', 'spec-driven', 'harness-plugin.yaml'), 'apiVersion: harness.dev/v1\nkind: Plugin\nmetadata:\n  name: spec-driven\n  version: 0.1.0\ndependencies:\n  plugins:\n    documentation: ">=9.0"\n');
+  assert.throws(() => run(cwd, 'add', 'spec-driven'), /requires dependency documentation >=9\.0, found 0\.1\.0/);
 });
 
 test('manifest validation rejects unknown permission fields and invalid contributions', () => {

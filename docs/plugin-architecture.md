@@ -305,6 +305,15 @@ Exit criterion: adding an audit rule requires only a plugin contribution and con
 
 Exit criterion: no plugin writes project files directly during adoption.
 
+### M3.1: Local full-stack integration (implemented)
+
+- Expose audit, Plan, and governed apply through a loopback-only HTTP adapter.
+- Serve a static browser console that consumes the same API contract used by integration tests.
+- Redact operation content from the public Plan view while retaining scope, provenance, preconditions, and review status.
+- Keep HTTP transport out of the Kernel executor and preserve CLI process isolation.
+
+Exit criterion: a browser can inspect a real audit, generate a Plan, and apply it through the existing permission, verification, and rollback gates.
+
 ### M4: Lifecycle, upgrade, and hosted execution
 
 - Add lockfile resolution, migrations, permission diffs, and reverse-order disposal.

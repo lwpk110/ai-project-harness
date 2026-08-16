@@ -2,26 +2,61 @@
 
 AI Project Harness provides a CLI for initializing and adopting a governed workspace for AI coding agents.
 
-Its direction is a governed microkernel: the kernel owns permissions, plans, transactions, audit, ownership, and rollback; every project-specific capability is delivered by a plugin. See [Architecture](docs/architecture.md), [Plugin Architecture](docs/plugin-architecture.md), and [ADR 0001](docs/decisions/0001-every-product-capability-is-a-plugin.md).
+Its direction is a governed microkernel: the kernel owns permissions, plans, transactions, audit, ownership, and rollback; every project-specific capability is delivered by a plugin. The v0.2 product direction adds a canonical `.harness` capability plane, local MCP routing, and governed agent-native projections so one capability set can serve multiple agent CLIs without replacing their native launch commands. See [PRD v0.2](docs/ai-project-harness-prd-v0.2.md), [Architecture](docs/architecture.md), [Plugin Architecture](docs/plugin-architecture.md), [ADR 0001](docs/decisions/0001-every-product-capability-is-a-plugin.md), [ADR 0002](docs/decisions/0002-unified-multi-agent-harness-capability-plane.md), [ADR 0003](docs/decisions/0003-capability-ir-and-reproducible-native-projections.md), and [ADR 0004](docs/decisions/0004-native-agent-activation-and-local-mcp-session-topology.md).
 
 ## Quick start
 
+The current checkout is not published to npm. Install it globally from the source checkout:
+
+```bash
+cd /path/to/ai-project-harness
+npm install
+npm install --global .
+mkdir /path/to/my-agent-project
+cd /path/to/my-agent-project
+harness init --preset agent-project --agents codex claude --ci github
+harness doctor
+```
+
+To develop this Harness repository itself:
+
 ```bash
 npm install
-node src/cli.js init --preset minimal
+node src/cli.js init --preset agent-project --agents codex,claude --ci github
 node src/cli.js audit --format markdown
 node src/cli.js plan
 node src/cli.js apply
+node src/cli.js serve
 node src/cli.js doctor
 node src/cli.js verify
 ```
 
+`init` without a preset (or with `--preset minimal`) keeps the adoption-compatible
+minimal flow: it creates the Harness configuration and baseline agent instructions.
+Use `agent-project`, `startup-web`, or `backend-service` when creating a new project;
+these presets also generate the runtime-neutral `agent/` surface, package metadata,
+and optional GitHub Actions verification workflow. Initialization is idempotent and
+never overwrites existing project files.
+
+To install the current Harness checkout into a project's local `node_modules/.bin`,
+add `--local-bin` during initialization:
+
+```bash
+node src/cli.js init --preset agent-project --local-bin
+npx --no-install harness doctor
+npx --no-install harness audit
+```
+
+The local install is ignored by the generated `.gitignore`; it does not add a
+machine-specific dependency to the project's `package.json` or lockfile.
+
 ## Commands
 
-- `init`: create a new harness configuration and baseline files.
+- `init`: initialize a Harness project. Use an explicit non-minimal preset to generate a complete AI Agent project scaffold.
 - `adopt` / `audit`: inspect an existing project without changing it.
 - `plan`: turn audit findings into an integration plan.
 - `apply`: apply selected low-risk changes with a recovery snapshot.
+- `serve`: start the local HTTP API and browser control surface on `127.0.0.1:3210`.
 - `add`: enable a built-in plugin.
 - `doctor`: validate configuration and plugin dependencies.
 - `verify`: run the configured verification command.
@@ -35,3 +70,5 @@ The kernel is runtime-neutral. Agent runtimes are optional Connector + Adapter p
 The runnable v0.1 slice establishes the CLI, manifests, state model, audit report, and safe adoption flow. M1 parses configuration and manifests structurally, discovers bundled plugins from their manifests, and validates compatibility, dependencies, and duplicate contributions. M2 composes read-only, provenance-backed audit facts and findings from declarative official plugins. M3 moves finding-to-change mapping into declarative Recipe contributions and adds deterministic immutable Plans, typed operations, conflict checks, stale-input rejection, permission review, and transactional file execution with recovery and rollback.
 
 M3 executes `file.create`, `file.replace`, `structured.merge`, and `directory.ensure` through the kernel executor. `command.run` and `connector.configure` are schema-validated, permission-checked, and held behind a review gate; their execution brokers are intentionally deferred to the hosted/runtime milestones. The kernel remains the trust boundary: plugins propose operations, but never write project files during `plan`.
+
+The first full-stack integration slice is now available through `harness serve`: a local HTTP adapter exposes the governed audit/plan/apply pipeline to the static browser console. See [HTTP API](docs/http-api.md). The adapter is loopback-only and returns a redacted Plan view; all writes still pass through the CLI's immutable-plan, permission, verification, and rollback gates. The MVP acceptance path is exercised by the repository CI workflow on Node 20 and 22.

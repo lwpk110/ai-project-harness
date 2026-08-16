@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#10161d">
+    <title>Harness Workspace</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand-mark" aria-hidden="true">H</div>
+      <div>
+        <p class="eyebrow">AI PROJECT HARNESS</p>
+        <h1>Governed workspace</h1>
+      </div>
+      <div class="topbar-actions">
+        <span id="connection-status" class="status-dot status-dot--idle" role="status" aria-live="polite" aria-atomic="true">Connecting</span>
+        <button type="button" class="button button--quiet" data-action="refresh"><span aria-hidden="true">&#8635;</span> Refresh</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero-band">
+        <div>
+          <p class="eyebrow">AUDIT / PLAN / APPLY</p>
+          <h2 id="project-name">Loading workspace</h2>
+          <p id="project-meta" class="muted">Reading the governed project view...</p>
+        </div>
+        <div class="hero-actions">
+          <button type="button" class="button button--primary" data-action="plan" aria-busy="false"><span aria-hidden="true">&#9881;</span> Generate plan</button>
+          <button type="button" class="button button--accent" data-action="apply" aria-busy="false" disabled><span aria-hidden="true">&#10003;</span> Apply approved</button>
+        </div>
+      </section>
+
+      <div id="message" class="message" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+
+      <section class="metrics" aria-label="Workspace summary">
+        <div class="metric"><span class="metric-label">Findings</span><strong id="finding-count">-</strong><span id="finding-subtitle" class="metric-subtitle">Awaiting audit</span></div>
+        <div class="metric"><span class="metric-label">Plan status</span><strong id="plan-status">-</strong><span id="plan-subtitle" class="metric-subtitle">No plan loaded</span></div>
+        <div class="metric"><span class="metric-label">Plugins</span><strong id="plugin-count">-</strong><span class="metric-subtitle">Enabled contributions</span></div>
+        <div class="metric"><span class="metric-label">Last apply</span><strong id="apply-status">-</strong><span id="apply-subtitle" class="metric-subtitle">No changes applied</span></div>
+      </section>
+
+      <section class="workspace-grid">
+        <article class="panel panel--findings">
+          <div class="panel-heading"><div><p class="eyebrow">EVIDENCE</p><h3>Audit findings</h3></div><span id="audit-time" class="muted"></span></div>
+          <div id="findings" class="finding-list" aria-live="polite"><p class="empty">No findings loaded.</p></div>
+        </article>
+        <article class="panel panel--plan">
+          <div class="panel-heading"><div><p class="eyebrow">PROPOSED CHANGE</p><h3>Plan operations</h3></div><span id="plan-id" class="mono muted"></span></div>
+          <div id="operations" class="operation-list" aria-live="polite"><p class="empty">Generate a plan to inspect operations.</p></div>
+        </article>
+      </section>
+    </main>
+
+    <footer><span>Local-only control surface</span><span>Kernel protocol <code>harness.dev/http/v1</code></span></footer>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
